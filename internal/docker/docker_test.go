@@ -181,3 +181,22 @@ func TestSanitizeText(t *testing.T) {
 		}
 	}
 }
+
+func TestErrorText(t *testing.T) {
+	t.Parallel()
+	const host = "tcp://user:secret@10.0.0.1:2376"
+	err := fmt.Errorf("error during connect: Get \"%s/v1.57/events\": dial tcp: \x1b[31mrefused", host)
+	got := ErrorText(host, err)
+	if strings.Contains(got, "secret") || strings.Contains(got, "user:") {
+		t.Errorf("ErrorText leaks credentials: %q", got)
+	}
+	if strings.ContainsRune(got, '\x1b') {
+		t.Errorf("ErrorText keeps an escape character: %q", got)
+	}
+	if !strings.Contains(got, "tcp://10.0.0.1:2376") {
+		t.Errorf("ErrorText lost the redacted endpoint: %q", got)
+	}
+	if got := ErrorText(host, nil); got != "" {
+		t.Errorf("ErrorText(nil) = %q, want empty", got)
+	}
+}

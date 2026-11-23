@@ -92,6 +92,16 @@ func ConnectErrorMessage(host string, err error, timeout time.Duration) string {
 	return SanitizeText(msg)
 }
 
+// ErrorText returns err's message made safe for display: the credentials of
+// host (the endpoint the error may embed) are removed and terminal control
+// characters are replaced. It returns "" for a nil err.
+func ErrorText(host string, err error) string {
+	if err == nil {
+		return ""
+	}
+	return SanitizeText(redactCredentials(err.Error(), host))
+}
+
 // RedactHost removes any user credentials ("user:password@") from an
 // endpoint URL so that it can be displayed. It does not rely on URL parsing,
 // so malformed endpoints are redacted too.
