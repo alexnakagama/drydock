@@ -487,3 +487,44 @@ func TestLogsVeryLongLineIsSplit(t *testing.T) {
 		}
 	}
 }
+
+func TestLogsReopenAfterRestart(t *testing.T) {
+	e, f, id := logEnv(t, 2, nil)
+	lv := e.openLogs()
+	e.until("backlog", func() bool { return e.lastContentLine() == "line 1" })
+	e.press("r") // not ended yet: ignored
+	if lv.ended || lv.lines.Len() != 2 {
+		t.Fatalf("r before the end changed the view: ended %v, %d lines", lv.ended, lv.lines.Len())
+	}
+	if err := f.ContainerStop(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	e.until("ended", func() bool { return strings.Contains(e.header(), "[ended]") })
+	if err := f.ContainerStart(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	e.press("r")
+	e.until("following again", func() bool { return strings.Contains(e.header(), "[following]") })
+	f.WriteLog(id, false, "after restart\n")
+	e.until("new output", func() bool { return e.lastContentLine() == "after restart" })
+	var got []string
+	for i := range lv.lines.Len() {
+		got = append(got, lv.lines.At(i).text)
+	}
+	if want := []string{"line 0", "line 1", "after restart"}; !slices.Equal(got, want) {
+		t.Errorf("lines = %q, want %q (no duplicates)", got, want)
+	}
+}
+
+func TestLineWriterDoesNotSplitEscapes(t *testing.T) {
+	var got []string
+	w := &lineWriter{max: 100, emit: func(l string) bool { got = append(got, l); return true }}
+	// The colour code would straddle the 100-byte cut.
+	in := strings.Repeat("a", 97) + "\x1b[31mred\x1b[0m\n"
+	if _, err := w.Write([]byte(in)); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{strings.Repeat("a", 97), "red"}; !slices.Equal(got, want) {
+		t.Errorf("lines = %q, want %q", got, want)
+	}
+}

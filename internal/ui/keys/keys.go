@@ -141,10 +141,14 @@ type LogsMap struct {
 	// Follow jumps to the newest line and resumes auto-follow.
 	Follow key.Binding
 	Search key.Binding
+	// Reopen restarts a stream that has ended (for example after the
+	// container was restarted).
+	Reopen key.Binding
 }
 
 // Logs is the logs-view keymap.
 var Logs = LogsMap{
 	Follow: key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "follow")),
 	Search: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+	Reopen: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reopen")),
 }
