@@ -13,12 +13,13 @@ import (
 // Resources returns the root views the command bar can switch to, backed
 // by st.
 //
-// The containers, images and volumes views are placeholders until their
-// tasks (5.x, 6.x, 7.x) replace them.
+// The images and volumes views are placeholders until their tasks (6.x,
+// 7.x) replace them.
 func Resources(st *store.Store) []ui.Resource {
-	_ = st // used by the real views
 	return []ui.Resource{
-		{Name: "containers", Aliases: []string{"co"}, New: placeholderFactory("containers")},
+		{Name: "containers", Aliases: []string{"co"}, New: func(snap store.Snapshot) ui.View {
+			return NewContainers(st, snap)
+		}},
 		{Name: "images", Aliases: []string{"im"}, New: placeholderFactory("images")},
 		{Name: "volumes", Aliases: []string{"vol"}, New: placeholderFactory("volumes")},
 	}

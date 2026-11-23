@@ -124,6 +124,17 @@ func New(resources []Resource, initial string) *Model {
 	return m
 }
 
+// SetTimerFunc replaces the function the model uses to schedule delayed
+// messages (status expiry, spinner frames), which is tea.Tick by default.
+// It exists for tests that drive the model synchronously and must not wait
+// on real timers. A nil fn restores tea.Tick.
+func (m *Model) SetTimerFunc(fn func(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd) {
+	if fn == nil {
+		fn = tea.Tick
+	}
+	m.after = fn
+}
+
 func resourceNames(rs []Resource) []string {
 	names := make([]string, len(rs))
 	for i, r := range rs {
@@ -230,6 +241,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prompt, cmd = components.NewPrompt(msg.title, msg.placeholder)
 		m.onSubmit = msg.onSubmit
 		return m, cmd
+	case foregroundMsg:
+		if !m.canOpenDialog(msg.origin) {
+			return m, m.setStatus(statusError, msg.dropped)
+		}
+		return m, tagCmd(msg.origin, msg.cmd)
 	case statusMsg:
 		return m, m.setStatus(msg.kind, msg.text)
 	case statusExpireMsg:

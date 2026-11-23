@@ -1101,3 +1101,44 @@ func loadSnapshot(t *testing.T) store.Snapshot {
 		}
 	}
 }
+
+type foregroundRanMsg struct{}
+
+func TestForegroundRunsOnlyWhenInFront(t *testing.T) {
+	ran := func() tea.Msg { return foregroundRanMsg{} }
+	ranIn := func(msgs []tea.Msg) bool {
+		for _, m := range msgs {
+			if _, ok := m.(foregroundRanMsg); ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	// From the top view with nothing open: runs.
+	h := newHarness(t)
+	if !ranIn(h.send(tagCmd(h.m.topID(), Foreground(ran, "dropped")))) {
+		t.Error("not run from the top view")
+	}
+
+	// From a view below the top: dropped with the given status.
+	h = newHarness(t)
+	root := h.m.topID()
+	h.press("l") // push a detail view
+	if ranIn(h.send(tagCmd(root, Foreground(ran, "shell not opened")))) {
+		t.Error("run from a view below the top")
+	}
+	if !strings.Contains(h.statusLine(), "shell not opened") {
+		t.Errorf("status = %q", h.statusLine())
+	}
+
+	// With an overlay open: dropped, and the overlay stays.
+	h = newHarness(t)
+	h.press("?")
+	if ranIn(h.send(tagCmd(h.m.topID(), Foreground(ran, "dropped")))) {
+		t.Error("run with the help overlay open")
+	}
+	if h.m.overlay != overlayHelp {
+		t.Error("overlay closed")
+	}
+}

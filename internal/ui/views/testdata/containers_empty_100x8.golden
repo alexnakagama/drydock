@@ -1,0 +1,8 @@
+ drydock > containers [running]                                                         ● connected 
+NAME                    IMAGE                      STATUS                  PORTS                    
+ No running containers.                                                                             
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+ s start/stop  r restart  d delete  l logs  i inspect  x shell  a all/running  / filter  : command …

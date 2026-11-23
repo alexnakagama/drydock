@@ -78,3 +78,73 @@ type ConfirmMap struct {
 var Confirm = ConfirmMap{
 	Yes: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "confirm")),
 }
+
+// PagerMap holds the scrolling keys of text views (inspect, logs).
+type PagerMap struct {
+	Up       key.Binding
+	Down     key.Binding
+	Top      key.Binding
+	Bottom   key.Binding
+	PageUp   key.Binding
+	PageDown key.Binding
+	Left     key.Binding
+	Right    key.Binding
+}
+
+// Pager is the text-view scrolling keymap. Vertical keys match the list
+// keys, so moving around feels the same in every view.
+var Pager = PagerMap{
+	Up:       Table.Up,
+	Down:     Table.Down,
+	Top:      Table.Top,
+	Bottom:   Table.Bottom,
+	PageUp:   Table.PageUp,
+	PageDown: Table.PageDown,
+	Left:     key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "scroll left")),
+	Right:    key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "scroll right")),
+}
+
+// Bindings returns the pager bindings in display order.
+func (m PagerMap) Bindings() []key.Binding {
+	return []key.Binding{m.Up, m.Down, m.Top, m.Bottom, m.PageUp, m.PageDown, m.Left, m.Right}
+}
+
+// ContainersMap holds the containers view's action keys.
+type ContainersMap struct {
+	StartStop key.Binding
+	Restart   key.Binding
+	Delete    key.Binding
+	Logs      key.Binding
+	Inspect   key.Binding
+	Shell     key.Binding
+	ToggleAll key.Binding
+}
+
+// Containers is the containers-view keymap.
+var Containers = ContainersMap{
+	StartStop: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start/stop")),
+	Restart:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
+	Delete:    key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+	Logs:      key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "logs")),
+	Inspect:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "inspect")),
+	Shell:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "shell")),
+	ToggleAll: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/running")),
+}
+
+// Bindings returns the containers-view bindings in display order.
+func (m ContainersMap) Bindings() []key.Binding {
+	return []key.Binding{m.StartStop, m.Restart, m.Delete, m.Logs, m.Inspect, m.Shell, m.ToggleAll}
+}
+
+// LogsMap holds the logs view's own keys (scrolling uses Pager).
+type LogsMap struct {
+	// Follow jumps to the newest line and resumes auto-follow.
+	Follow key.Binding
+	Search key.Binding
+}
+
+// Logs is the logs-view keymap.
+var Logs = LogsMap{
+	Follow: key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "follow")),
+	Search: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+}
