@@ -8,10 +8,10 @@
 
 ## 2. Docker service layer
 
-- [ ] 2.1 Define the `docker.Service` interface (ping, list/inspect for containers/images/volumes, container start/stop/restart/remove, logs, image pull/remove/prune, volume create/inspect/remove, exec create/start/inspect for shell probing, events), and verify it compiles with both implementations below
-- [ ] 2.2 Implement the SDK-backed service using `client.New(client.FromEnv)`, and verify an `integration`-tagged test lists containers against the local engine and that `cli.ClientVersion()` equals the engine's API version after `Ping` (`go test -tags integration ./internal/docker/...`)
-- [ ] 2.3 Implement an in-memory fake service with scriptable events and errors, and verify its own unit tests pass
-- [ ] 2.4 Implement startup connection check in `main` (5s ping before entering the TUI, error mapping for refused/not-found and permission denied, exit status 1), and verify by running with `DOCKER_HOST=unix:///nonexistent.sock` that the documented message is printed and the exit code is 1
+- [x] 2.1 Define the `docker.Service` interface (ping, list/inspect for containers/images/volumes, container start/stop/restart/remove, logs, image pull/remove/prune, volume create/inspect/remove, exec create/start/inspect for shell probing, events), and verify it compiles with both implementations below
+- [x] 2.2 Implement the SDK-backed service using `client.New(client.FromEnv)`, and verify an `integration`-tagged test lists containers against the local engine and that `cli.ClientVersion()` equals the engine's API version after `Ping` (`go test -tags integration ./internal/docker/...`)
+- [x] 2.3 Implement an in-memory fake service with scriptable events and errors, and verify its own unit tests pass
+- [x] 2.4 Implement startup connection check in `main` (5s ping before entering the TUI, error mapping for refused/not-found and permission denied, exit status 1), and verify by running with `DOCKER_HOST=unix:///nonexistent.sock` that the documented message is printed and the exit code is 1
 
 ## 3. Store and live updates
 

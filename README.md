@@ -40,8 +40,10 @@ context, set `DOCKER_HOST` to that context's endpoint.
 ## Build and run
 
 Until the TUI lands, `drydock` only supports `-version` and `-h`. Running it
-without flags prints "the terminal UI is not implemented yet" and exits with
-status 1.
+without flags checks that the engine is reachable (waiting at most 5 seconds),
+then prints "the terminal UI is not implemented yet" and exits with status 1.
+If the engine cannot be reached, it prints the endpoint it tried and why
+(engine not running, permission denied, or timeout) and exits with status 1.
 
 Run from a checkout:
 
@@ -79,8 +81,7 @@ go test -race ./...
 
 Integration tests run against a real engine and are opt-in, behind the
 `integration` build tag. They create labeled test resources and remove them
-afterwards. (They arrive with the Docker service layer; until then this
-command runs only the unit tests.)
+afterwards.
 
 ```sh
 go test -tags integration ./...
