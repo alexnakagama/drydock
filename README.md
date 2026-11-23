@@ -3,8 +3,9 @@
 A terminal UI for managing a local Docker engine: containers, images and
 volumes, with live updates from the engine's event stream.
 
-> Status: early development. The project skeleton is in place; the TUI is
-> being built incrementally (see `openspec/changes/bootstrap-drydock-tui`).
+> Status: early development. The application shell (navigation, command
+> bar, filtering, help, dialogs) is in place; the resource views are being
+> built incrementally (see `openspec/changes/bootstrap-drydock-tui`).
 
 ## Requirements
 
@@ -39,11 +40,12 @@ context, set `DOCKER_HOST` to that context's endpoint.
 
 ## Build and run
 
-Until the TUI lands, `drydock` only supports `-version` and `-h`. Running it
-without flags checks that the engine is reachable (waiting at most 5 seconds),
-then prints "the terminal UI is not implemented yet" and exits with status 1.
-If the engine cannot be reached, it prints the endpoint it tried and why
-(engine not running, permission denied, or timeout) and exits with status 1.
+Running `drydock` first checks that the engine is reachable (waiting at most
+5 seconds). If it cannot be reached, drydock prints the endpoint it tried and
+why (engine not running, permission denied, or timeout) and exits with status
+1. Otherwise it opens the full-screen terminal UI. The resource lists are
+still being built, so for now the containers, images and volumes views are
+placeholders. `q` or Ctrl+C quits with status 0 and restores the terminal.
 
 Run from a checkout:
 
@@ -63,6 +65,18 @@ Install into `$(go env GOPATH)/bin`:
 ```sh
 go install ./cmd/drydock
 ```
+
+Keys of the application shell. List navigation and filtering apply to the
+resource lists, which replace the current placeholder views as they land:
+
+| Key      | Action                                                        |
+|----------|---------------------------------------------------------------|
+| `:`      | Command bar: `containers`, `images`, `volumes` (`co`, `im`, `vol`) |
+| `/`      | Filter the list (case-insensitive); Esc clears it             |
+| `j`/`k`, arrows | Move the selection; `g`/`G` jump to the first/last row |
+| `Esc`    | Clear the filter, otherwise go back to the previous view      |
+| `?`      | Help                                                          |
+| `q`      | Quit (Ctrl+C quits from anywhere, even inside a text input)   |
 
 Flags:
 

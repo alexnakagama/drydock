@@ -23,12 +23,12 @@
 
 ## 4. Application shell and navigation
 
-- [ ] 4.1 Implement the root model with full-screen layout (header with breadcrumb and connection indicator, content, footer key hints, status line) and resize handling, and verify a golden-file test of `View()` at 100x30 plus a unit test that a `WindowSizeMsg` preserves selection and filter
-- [ ] 4.2 Implement the view stack (push, pop on Esc never below root, filter-clears-first rule, replace on `:command`), and verify unit tests for each scenario in the `tui-navigation` "Drill-down view stack" requirement
-- [ ] 4.3 Implement the command bar with `containers/images/volumes` and aliases `co/im/vol`, unknown-command error, and Esc cancel, and verify unit tests for each command-bar scenario
-- [ ] 4.4 Implement a shared table component with j/k/arrows/g/G navigation, selection preserved by a per-view row key (container ID, image ID+reference, volume name) across refreshes, nearest-row fallback, empty-state message, and `/` case-insensitive filter, and verify unit tests for selection-survives-refresh and filter scenarios
-- [ ] 4.5 Implement overlays: help (`?`), confirm dialog (only `y` confirms), and single-line text prompt, with key routing order Ctrl+C -> overlay -> focused view input -> global -> view, and verify unit tests that non-`y` keys cancel the confirm dialog, help opens/closes with `?`/Esc, Ctrl+C quits with an overlay open, and typing `q`, `:` and `?` into an active filter appends them to the filter text
-- [ ] 4.6 Implement status feedback (transient success, error with engine text, in-progress spinner) and quit on `q`/Ctrl+C restoring the terminal, and verify unit tests for status messages and a manual run confirming the terminal is restored after `q`
+- [x] 4.1 Implement the root model with full-screen layout (header with breadcrumb and connection indicator, content, footer key hints, status line) and resize handling, and verify a golden-file test of `View()` at 100x30 plus a unit test that a `WindowSizeMsg` preserves selection and filter
+- [x] 4.2 Implement the view stack (push, pop on Esc never below root, filter-clears-first rule, replace on `:command`), and verify unit tests for each scenario in the `tui-navigation` "Drill-down view stack" requirement
+- [x] 4.3 Implement the command bar with `containers/images/volumes` and aliases `co/im/vol`, unknown-command error, and Esc cancel, and verify unit tests for each command-bar scenario
+- [x] 4.4 Implement a shared table component with j/k/arrows/g/G navigation, selection preserved by a per-view row key (container ID, image ID+reference, volume name) across refreshes, nearest-row fallback, empty-state message, and `/` case-insensitive filter, and verify unit tests for selection-survives-refresh and filter scenarios
+- [x] 4.5 Implement overlays: help (`?`), confirm dialog (only `y` confirms), and single-line text prompt, with key routing order Ctrl+C -> overlay -> focused view input -> global -> view, and verify unit tests that non-`y` keys cancel the confirm dialog, help opens/closes with `?`/Esc, Ctrl+C quits with an overlay open, and typing `q`, `:` and `?` into an active filter appends them to the filter text
+- [x] 4.6 Implement status feedback (transient success, error with engine text, in-progress spinner) and quit on `q`/Ctrl+C restoring the terminal, and verify unit tests for status messages and a manual run confirming the terminal is restored after `q`
 
 ## 5. Containers
 
