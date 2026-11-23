@@ -159,14 +159,17 @@ func (v *logsView) wait() tea.Cmd {
 // delivers its lines in batches. It closes v.done when it and the reader it
 // starts have exited.
 func (v *logsView) stream() {
-	defer close(v.done)
+	// The stream's state is read once: reopen replaces it, but only after
+	// this stream has delivered its last batch.
+	ctx, batches, done := v.ctx, v.batches, v.done
+	defer close(done)
 	lines := make(chan string, v.cfg.batchLines)
 	var readErr error
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
 		defer close(lines)
-		readErr = v.read(lines)
+		readErr = v.read(ctx, lines)
 	}()
 	// The reader exits promptly once ctx is cancelled: its stream is
 	// closed and its sends give up.
@@ -182,9 +185,9 @@ func (v *logsView) stream() {
 	send := func(m logLinesMsg) bool {
 		m.view = v.id
 		select {
-		case v.batches <- m:
+		case batches <- m:
 			return true
-		case <-v.ctx.Done():
+		case <-ctx.Done():
 			return false
 		}
 	}
@@ -195,7 +198,7 @@ func (v *logsView) stream() {
 				// readerDone is closed after lines, but readErr is written
 				// before lines is closed, so reading it here is safe.
 				msg := logLinesMsg{lines: batch, end: true}
-				if readErr != nil && v.ctx.Err() == nil {
+				if readErr != nil && ctx.Err() == nil {
 					msg.err, msg.reason = readErr, v.st.ErrorText(readErr)
 				}
 				send(msg)
@@ -220,7 +223,7 @@ func (v *logsView) stream() {
 				return
 			}
 			batch = nil
-		case <-v.ctx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}
@@ -229,8 +232,7 @@ func (v *logsView) stream() {
 // read opens the log stream and writes its lines to out until the stream
 // ends or ctx is cancelled. It returns nil when the stream ended normally
 // (for example because the container stopped) or the view was closed.
-func (v *logsView) read(out chan<- string) error {
-	ctx := v.ctx
+func (v *logsView) read(ctx context.Context, out chan<- string) error {
 	err := v.st.Do(ctx, func(ctx context.Context, svc docker.Service) error {
 		ictx, cancel := context.WithTimeout(ctx, v.cfg.inspectTimeout)
 		info, err := svc.ContainerInspect(ictx, v.containerID)
@@ -317,6 +319,10 @@ func (w *lineWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+// escLookback is how far before a cut splitLong looks for the start of an
+// escape sequence; colour (SGR) sequences are much shorter.
+const escLookback = 64
+
 // splitLong emits leading chunks of the pending line while it is longer
 // than max bytes, cutting at a UTF-8 character boundary so that no
 // character is split.
@@ -328,6 +334,13 @@ func (w *lineWriter) splitLong() bool {
 		}
 		if n == 0 {
 			n = w.max // not UTF-8 text; cut anywhere
+		}
+		// Cut before an escape sequence that starts just before the cut,
+		// so a colour code is not split in two (its tail would show as
+		// text once the line is cleaned).
+		from := max(n-escLookback, 0)
+		if e := bytes.LastIndexByte(w.partial[from:n], '\x1b'); e >= 0 && from+e > 0 {
+			n = from + e
 		}
 		if !w.send(w.partial[:n]) {
 			return false
@@ -487,6 +500,8 @@ func (v *logsView) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.follow = true
 		v.pager.GotoBottom()
 		return nil
+	case v.ended && key.Matches(msg, keys.Logs.Reopen):
+		return v.reopen()
 	}
 	if v.pager.Update(msg) {
 		// Scrolling away from the newest line pauses auto-follow; coming
@@ -694,6 +709,10 @@ func (v *logsView) Indicators() []string {
 }
 
 func (v *logsView) KeyHelp() []key.Binding {
+	if v.ended {
+		return []key.Binding{keys.Logs.Reopen, keys.Logs.Follow, keys.Logs.Search, keys.Pager.Up, keys.Pager.Down,
+			keys.Pager.PageUp, keys.Pager.PageDown, keys.Pager.Top, keys.Pager.Left, keys.Pager.Right}
+	}
 	return []key.Binding{keys.Logs.Follow, keys.Logs.Search, keys.Pager.Up, keys.Pager.Down,
 		keys.Pager.PageUp, keys.Pager.PageDown, keys.Pager.Top, keys.Pager.Left, keys.Pager.Right}
 }
@@ -708,6 +727,26 @@ func (v *logsView) Back() bool {
 	v.input.Reset()
 	v.setSearch("")
 	return true
+}
+
+// reopen starts a new stream after the previous one ended, for example
+// because the container was restarted. The kept lines are replaced by the
+// new stream's backlog, which includes the previous output, so nothing is
+// shown twice; the search is kept.
+func (v *logsView) reopen() tea.Cmd {
+	v.cancel() // the ended stream's context
+	v.ctx, v.cancel = context.WithCancel(context.Background())
+	v.batches = make(chan logLinesMsg)
+	v.done = make(chan struct{})
+	v.lines = newLineRing(v.cfg.maxLines)
+	v.bytes, v.contentWidth = 0, 0
+	v.matches = v.matches[:0:0]
+	v.ended, v.errText = false, ""
+	v.follow = true
+	v.pager.SetContentWidth(0)
+	v.pager.SetTotal(0)
+	v.pager.GotoBottom()
+	return v.Init()
 }
 
 // Close stops the stream. Its goroutines exit promptly afterwards.
