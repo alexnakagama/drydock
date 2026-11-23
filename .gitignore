@@ -1,0 +1,14 @@
+# Build output
+/drydock
+/bin/
+/dist/
+
+# Test and coverage artifacts
+*.test
+*.out
+coverage.*
+
+# Local environment
+.env
+.env.*
+!.env.example

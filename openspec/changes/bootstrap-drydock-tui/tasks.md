@@ -2,9 +2,9 @@
 
 ## 1. Project setup
 
-- [ ] 1.1 Initialize the Go module (`go mod init`), create the package layout from design D3 (`cmd/drydock`, `internal/docker`, `internal/store`, `internal/ui`, `internal/ui/views`, `internal/ui/components`, `internal/ui/keys`), and verify `go build ./...` succeeds
-- [ ] 1.2 Add dependencies `charm.land/bubbletea/v2`, `charm.land/bubbles/v2`, `charm.land/lipgloss/v2`, and `github.com/moby/moby/client` (pinned v0.6.x), and verify `go mod tidy` and `go build ./...` succeed
-- [ ] 1.3 Add a README section with build/run instructions and runtime requirements (engine socket access, `docker` CLI for exec), and verify `go run ./cmd/drydock` as documented starts the program
+- [x] 1.1 Initialize the Go module (`go mod init`), create the package layout from design D3 (`cmd/drydock`, `internal/docker`, `internal/store`, `internal/ui`, `internal/ui/views`, `internal/ui/components`, `internal/ui/keys`), and verify `go build ./...` succeeds
+- [x] 1.2 Add dependencies `charm.land/bubbletea/v2`, `charm.land/bubbles/v2`, `charm.land/lipgloss/v2`, and `github.com/moby/moby/client` (pinned v0.6.x), and verify `go mod tidy` and `go build ./...` succeed
+- [x] 1.3 Add a README section with build/run instructions and runtime requirements (engine socket access, `docker` CLI for exec), and verify `go run ./cmd/drydock` as documented starts the program
 
 ## 2. Docker service layer
 
