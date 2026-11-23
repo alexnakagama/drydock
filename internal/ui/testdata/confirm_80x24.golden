@@ -1,0 +1,24 @@
+ drydock > containers                                               ● connected 
+NAME          IMAGE                                                 STATUS      
+db            postgres:16                                           Up 2 hours  
+web           nginx:1.27                                            Up 5 minutes
+worker        alpine                                                Exited (0)  
+                                                                                
+                                                                                
+                                                                                
+   ╭────────────────────────────────────────────────────────────────────────╮   
+   │ Delete web?                                                            │   
+   │                                                                        │   
+   │ This cannot be undone.                                                 │   
+   │                                                                        │   
+   │ y confirm · any other key cancels                                      │   
+   ╰────────────────────────────────────────────────────────────────────────╯   
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+ l logs  d delete  / filter  : command  ? help  q quit                          

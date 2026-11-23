@@ -1,0 +1,30 @@
+ drydock > containers                                                                   ● connected 
+NAME          IMAGE                                                                     STATUS      
+db            postgres:16                                                               Up 2 hours  
+web           nginx:1.27                                                                Up 5 minutes
+worker        alpine                                                                    Exited (0)  
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+ l logs  d delete  / filter  : command  ? help  q quit                                              

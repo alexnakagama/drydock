@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/alexnakagama/drydock/internal/docker"
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
@@ -27,6 +30,19 @@ func fakeDeps(t *testing.T, f docker.Service) deps {
 			return f, nil
 		},
 		pingTimeout: 200 * time.Millisecond,
+		// The TUI reads a single "q" (quit) instead of the terminal.
+		programOptions: tuiOptions(strings.NewReader("q")),
+	}
+}
+
+// tuiOptions replaces the program's terminal with input and a discarded
+// output of a fixed size.
+func tuiOptions(input io.Reader) []tea.ProgramOption {
+	return []tea.ProgramOption{
+		tea.WithInput(input),
+		tea.WithOutput(io.Discard),
+		tea.WithWindowSize(100, 30),
+		tea.WithEnvironment([]string{"TERM=xterm-256color"}),
 	}
 }
 
@@ -49,10 +65,9 @@ func TestRun(t *testing.T) {
 		{name: "positional argument", args: []string{"extra"}, wantCode: exitUsage, wantStderr: `unexpected argument "extra"`},
 		{name: "version with positional argument", args: []string{"-version", "extra"}, wantCode: exitUsage, wantStderr: `unexpected argument "extra"`},
 		{
-			name:       "engine reachable",
-			svc:        func() docker.Service { return dockerfake.New() },
-			wantCode:   exitError,
-			wantStderr: "not implemented yet",
+			name:     "engine reachable",
+			svc:      func() docker.Service { return dockerfake.New() },
+			wantCode: exitOK,
 		},
 		{
 			name: "engine not running",
@@ -139,6 +154,30 @@ func TestRunInterrupted(t *testing.T) {
 		t.Errorf("exit code = %d, want %d", code, exitInterrupted)
 	}
 	checkOutput(t, "stderr", stderr.String(), "interrupted")
+}
+
+func TestRunTUIInterrupted(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	// The input never delivers a key, so only cancellation (a signal in
+	// main) can end the program.
+	pr, pw := io.Pipe()
+	defer pw.Close()
+	d := fakeDeps(t, dockerfake.New())
+	d.programOptions = tuiOptions(pr)
+	time.AfterFunc(200*time.Millisecond, cancel)
+
+	done := make(chan int, 1)
+	var stdout, stderr bytes.Buffer
+	go func() { done <- run(ctx, nil, &stdout, &stderr, d) }()
+	select {
+	case code := <-done:
+		if code != exitInterrupted {
+			t.Errorf("exit code = %d, want %d (stderr %q)", code, exitInterrupted, stderr.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not return after its context was cancelled")
+	}
 }
 
 func TestRunClosesService(t *testing.T) {

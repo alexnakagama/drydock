@@ -15,7 +15,12 @@ import (
 	"syscall"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/alexnakagama/drydock/internal/docker"
+	"github.com/alexnakagama/drydock/internal/store"
+	"github.com/alexnakagama/drydock/internal/ui"
+	"github.com/alexnakagama/drydock/internal/ui/views"
 )
 
 // Exit statuses returned by run.
@@ -34,6 +39,9 @@ type deps struct {
 	// newService creates the engine service. It must not connect.
 	newService  func() (docker.Service, error)
 	pingTimeout time.Duration
+	// programOptions are appended to the TUI program's options; tests use
+	// them to replace the terminal.
+	programOptions []tea.ProgramOption
 }
 
 func defaultDeps() deps {
@@ -123,9 +131,53 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, d deps) i
 		return code
 	}
 
-	// The TUI is wired in by later tasks.
-	fmt.Fprintln(stderr, "drydock: the terminal UI is not implemented yet")
-	return exitError
+	err = runTUI(ctx, svc, d.programOptions)
+	switch {
+	case err == nil:
+		return exitOK
+	case ctx.Err() != nil:
+		return exitInterrupted
+	default:
+		fmt.Fprintf(stderr, "drydock: %s\n", docker.ErrorText(svc.Host(), err))
+		return exitError
+	}
+}
+
+// initialResource is the view drydock starts on.
+const initialResource = "containers"
+
+// runTUI runs the terminal UI until the user quits or ctx is cancelled.
+// The store runs alongside the program; its goroutine is stopped, and
+// waited for, before runTUI returns. Commands still in flight when the
+// program exits (for example an engine action) are not waited for: they are
+// bounded by their own timeouts, and the service tolerates concurrent use
+// while it is being closed.
+func runTUI(ctx context.Context, svc docker.Service, opts []tea.ProgramOption) error {
+	// The store delivers messages through the program. p is assigned before
+	// the store starts, and Send returns once the program has exited, so
+	// the store never blocks shutdown.
+	var p *tea.Program
+	st := store.New(svc, func(msg tea.Msg) { p.Send(msg) })
+	model := ui.New(views.Resources(st), initialResource)
+	defer model.Close()
+
+	// main handles SIGINT and SIGTERM by cancelling ctx, which kills the
+	// program and restores the terminal; Ctrl+C typed in the terminal is
+	// a key press and quits normally.
+	opts = append([]tea.ProgramOption{tea.WithContext(ctx), tea.WithoutSignalHandler()}, opts...)
+	p = tea.NewProgram(model, opts...)
+
+	storeCtx, stopStore := context.WithCancel(ctx)
+	storeDone := make(chan struct{})
+	go func() {
+		defer close(storeDone)
+		_ = st.Run(storeCtx) // returns nil once storeCtx is cancelled
+	}()
+
+	_, err := p.Run()
+	stopStore()
+	<-storeDone
+	return err
 }
 
 // checkConnection pings the engine before the TUI takes over the terminal,
