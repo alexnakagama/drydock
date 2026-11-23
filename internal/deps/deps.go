@@ -11,6 +11,5 @@ package deps
 
 import (
 	_ "charm.land/bubbles/v2/table"
-	_ "charm.land/bubbletea/v2"
 	_ "charm.land/lipgloss/v2"
 )

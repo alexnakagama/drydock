@@ -15,11 +15,11 @@
 
 ## 3. Store and live updates
 
-- [ ] 3.1 Implement the store's initial load of containers (all), images, and volumes into immutable snapshots delivered as `tea.Msg`, and verify with a fake-backed unit test
-- [ ] 3.2 Compute derived indexes (`imageID -> containers`, `volumeName -> containers`) per snapshot, and verify unit tests for IN USE counts including stopped containers and multi-tag images
-- [ ] 3.3 Subscribe to engine events with per-kind 150ms debounce and re-list of the affected kind, and verify unit tests that a burst of events yields one re-list and that container events refresh usage counts
-- [ ] 3.4 Implement disconnected state, capped backoff reconnect (1s/2s/4s/max 10s), full reload, and resubscribe on reconnect, and verify a fake-backed test that drops the event stream, then recovers and emits fresh snapshots
-- [ ] 3.5 Gate actions on connection state, and verify a unit test that an action while disconnected returns a "not connected" error without calling the service
+- [x] 3.1 Implement the store's initial load of containers (all), images, and volumes into immutable snapshots delivered as `tea.Msg`, and verify with a fake-backed unit test
+- [x] 3.2 Compute derived indexes (`imageID -> containers`, `volumeName -> containers`) per snapshot, and verify unit tests for IN USE counts including stopped containers and multi-tag images
+- [x] 3.3 Subscribe to engine events with per-kind 150ms debounce and re-list of the affected kind, and verify unit tests that a burst of events yields one re-list and that container events refresh usage counts
+- [x] 3.4 Implement disconnected state, capped backoff reconnect (1s/2s/4s/max 10s), full reload, and resubscribe on reconnect, and verify a fake-backed test that drops the event stream, then recovers and emits fresh snapshots
+- [x] 3.5 Gate actions on connection state, and verify a unit test that an action while disconnected returns a "not connected" error without calling the service
 
 ## 4. Application shell and navigation
 

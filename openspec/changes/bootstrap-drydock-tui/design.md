@@ -58,7 +58,7 @@ internal/ui/keys/          keymaps (global + per view)
           tea.Msg{Snapshot} --> root model --> active view re-renders
 ```
 - On startup the store lists all three kinds (containers with `All: true`, so "in use" counts include stopped containers).
-- On each `container`/`image`/`volume` event it schedules a re-list of that kind only. Bursts are debounced, so `docker compose up` doesn't trigger N re-lists. Container events also recompute the image and volume usage counts, since those come from the container data.
+- On each `container`/`image`/`volume` event it schedules a re-list of that kind only. Bursts are debounced, so `docker compose up` doesn't trigger N re-lists. The debounce is trailing (150ms after the last event of that kind) but capped at 1s after the first pending event, so a continuous event storm still refreshes the list at least once a second instead of postponing it forever; a burst longer than that cap yields one re-list per second. Container events also recompute the image and volume usage counts, since those come from the container data.
 - Snapshots are immutable values sent to the UI as messages. The UI never shares mutable state with the store goroutine, so no locks are needed in the views.
 - Derived indexes are computed once per snapshot: `imageID -> []container` and `volumeName -> []container`. They drive the IN USE columns, the drill-down filters, and the delete warnings.
 - *Alternative: polling every N seconds.* It is simpler, but it adds latency, sends wasted calls when nothing changes, and can't meet the 2-second update requirement cheaply.
@@ -66,7 +66,7 @@ internal/ui/keys/          keymaps (global + per view)
 
 ### D5. Connection lifecycle
 - At startup, `main` runs `Ping` with a 5-second timeout **before** entering the alternate screen. On failure it prints the endpoint and the error to stderr and exits with status 1. It maps `ECONNREFUSED`/not-found to "engine may not be running" and `EACCES` to "permission denied".
-- At runtime, an error on the event stream sends the store into a `disconnected` state, which the UI shows in the header. The store then retries `Ping` with capped backoff (1s, 2s, 4s, max 10s). On success it re-lists everything and resubscribes to events. Actions check the connection state first and fail immediately with "not connected".
+- At runtime, an error on the event stream sends the store into a `disconnected` state, which the UI shows in the header. The store then retries `Ping` with capped backoff (1s, 2s, 4s, max 10s). The backoff restarts from 1s only after a session that stayed connected for at least 30s, so a stream that drops right after connecting keeps backing off. On success it re-lists everything and resubscribes to events. Actions check the connection state first and fail immediately with "not connected".
 
 ### D6. Navigation: root model owns a view stack
 The root model holds `[]View`, where each `View` is a Bubble Tea model plus a `Breadcrumb()` and `KeyHelp()`. The root model also renders the header, footer, status line and overlays (command bar, help, confirm, prompt), and it routes keys:
