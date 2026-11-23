@@ -1,0 +1,10 @@
+ drydock > containers [running]                                                         ● connected 
+NAME                    IMAGE                      STATUS                  PORTS                    
+db                      postgres:16                Up 2 hours              5432/tcp                 
+frozen                  redis:7                    Up 1 hour (Paused)                               
+web                     nginx:1.27                 Up 5 minutes            8080->80/tcp             
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+ s start/stop  r restart  d delete  l logs  i inspect  x shell  a all/running  / filter  : command …

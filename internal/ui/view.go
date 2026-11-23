@@ -102,6 +102,11 @@ type (
 		kind statusKind
 		text string
 	}
+	foregroundMsg struct {
+		cmd     tea.Cmd
+		dropped string
+		origin  uint64
+	}
 	trackStartMsg struct {
 		text string
 		cmd  tea.Cmd
@@ -144,6 +149,11 @@ func tagMsg(origin uint64, msg tea.Msg) tea.Msg {
 			msg.origin = origin
 		}
 		return msg
+	case foregroundMsg:
+		if msg.origin == 0 {
+			msg.origin = origin
+		}
+		return msg
 	case trackStartMsg:
 		msg.cmd = tagCmd(origin, msg.cmd)
 		return msg
@@ -173,6 +183,16 @@ func Confirm(title string, body []string, onYes tea.Cmd) tea.Cmd {
 // overlay is open or the view that issued it is no longer the top view.
 func Prompt(title, placeholder string, onSubmit func(string) tea.Cmd) tea.Cmd {
 	return func() tea.Msg { return promptMsg{title: title, placeholder: placeholder, onSubmit: onSubmit} }
+}
+
+// Foreground returns a command that runs cmd only if, when the request
+// arrives, the view that issued it is still the top view and no overlay is
+// open. It is meant for commands that take over the screen, such as
+// tea.ExecProcess, and that were decided asynchronously: if the user has
+// moved on meanwhile (opened another view or a dialog), cmd is not run and
+// the status line shows dropped as an error instead.
+func Foreground(cmd tea.Cmd, dropped string) tea.Cmd {
+	return func() tea.Msg { return foregroundMsg{cmd: cmd, dropped: dropped} }
 }
 
 // Track returns a command that runs cmd while the status line shows an

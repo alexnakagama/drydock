@@ -1,0 +1,14 @@
+ drydock > containers > web > inspect                               ● connected 
+{                                                                               
+  "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",     
+  "Created": "1970-01-01T00:00:00Z",                                            
+  "Path": "",                                                                   
+  "Args": null,                                                                 
+  "State": {                                                                    
+    "Status": "running",                                                        
+    "Running": true,                                                            
+    "Paused": false,                                                            
+    "Restarting": false,                                                        
+    "OOMKilled": false,                                                         
+                                                                                
+ ↑/k up  ↓/j down  g top  G bottom  pgup page up  pgdn page down  ← scroll left…
