@@ -25,7 +25,7 @@
 
 ## 6. End-to-end verification
 
-- [ ] 6.1 Push the branch, open a PR, and confirm all CI jobs (lint, test ubuntu/macOS, integration, build) are green. Verify: the PR checks page shows every job passing
+- [x] 6.1 Push the branch, open a PR, and confirm all CI jobs (lint, test ubuntu/macOS, integration, build) are green. Verify: the PR checks page shows every job passing
 - [ ] 6.2 After merge, tag `v0.1.0` on `master` and push the tag. Confirm the release workflow publishes a GitHub Release with 4 archives, `checksums.txt` and a changelog. Verify: download the linux/amd64 archive, `sha256sum -c` against `checksums.txt` succeeds, and `./drydock -version` prints `drydock v0.1.0`
 
 ## Workflow follow-up
