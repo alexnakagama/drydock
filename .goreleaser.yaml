@@ -1,0 +1,67 @@
+# GoReleaser configuration for drydock (see openspec/changes/first-release/design.md §4).
+# CI pins the GoReleaser version in .github/workflows/ci.yml and release.yml.
+version: 2
+
+project_name: drydock
+
+before:
+  hooks:
+    - go mod verify
+
+builds:
+  - id: drydock
+    main: ./cmd/drydock
+    binary: drydock
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    # Explicit ldflags replace GoReleaser's default `-X main.version=...`:
+    # drydock reads its version from the Go toolchain's VCS build info
+    # (debug.ReadBuildInfo), which stamps the tag in a clean tag checkout.
+    ldflags:
+      - -s -w
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: drydock
+    ids:
+      - drydock
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: README.md
+        info:
+          mtime: "{{ .CommitDate }}"
+      - src: LICENSE*
+        info:
+          mtime: "{{ .CommitDate }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot+{{ .ShortCommit }}"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^Merge pull request"
+      - "(?i)^openspec"
+
+release:
+  github:
+    owner: alexnakagama
+    name: drydock
+  draft: false
+  prerelease: auto

@@ -578,7 +578,9 @@ func pullImage(ctx context.Context, svc docker.Service, ref string, report func(
 	if err != nil {
 		return "", err
 	}
-	defer stream.Close()
+	// The outcome is decided by the messages read; a failure to release
+	// the stream afterwards does not change it.
+	defer func() { _ = stream.Close() }()
 
 	var (
 		prog     pullProgress

@@ -1,0 +1,17 @@
+# golangci-lint configuration (v2 format).
+# Kept deliberately small for the first release: the `standard` set
+# (errcheck, govet, ineffassign, staticcheck, unused) plus gofmt.
+# CI pins the linter version in .github/workflows/ci.yml.
+version: "2"
+
+run:
+  # Integration tests are behind a build tag; CI lints both with and
+  # without it (`golangci-lint run --build-tags integration ./...`).
+  tests: true
+
+linters:
+  default: standard
+
+formatters:
+  enable:
+    - gofmt

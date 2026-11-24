@@ -303,7 +303,7 @@ func TestClean(t *testing.T) {
 		"a\r\nb":        "a b",
 		"a\rb\nc\td":    "a b c d",
 		"x\x1b[2Jy":     "x�[2Jy",
-		"evil‮txt":      "evil�txt",
+		"evil\u202etxt": "evil�txt",
 		"plain ünïcödé": "plain ünïcödé",
 	}
 	for in, want := range cases {
@@ -316,12 +316,12 @@ func TestClean(t *testing.T) {
 func TestInputsDropBidiControls(t *testing.T) {
 	tb := newTestTable(row("1", "web", "nginx", ""))
 	press(t, &tb, "/")
-	tb.Update(tea.PasteMsg{Content: "we‮b⁦"})
+	tb.Update(tea.PasteMsg{Content: "we\u202eb\u2066"})
 	if tb.Filter() != "web" {
 		t.Errorf("filter %q, want the bidi controls removed", tb.Filter())
 	}
 	p, _ := NewPrompt("x", "")
-	p, _, _ = p.Update(tea.PasteMsg{Content: "da‭ta"})
+	p, _, _ = p.Update(tea.PasteMsg{Content: "da\u202dta"})
 	if p.Value() != "data" {
 		t.Errorf("prompt value %q, want the bidi controls removed", p.Value())
 	}

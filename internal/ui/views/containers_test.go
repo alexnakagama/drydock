@@ -329,12 +329,12 @@ func TestInspectReportsError(t *testing.T) {
 
 func TestPrettyJSONSanitizes(t *testing.T) {
 	t.Parallel()
-	lines, err := prettyJSON([]byte("{\"a\":\"x\u009b31my‮\",\"b\":[1,2]}"))
+	lines, err := prettyJSON([]byte("{\"a\":\"x\u009b31my\u202e\",\"b\":[1,2]}"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := strings.Join(lines, "\n")
-	if strings.ContainsRune(got, '\u009b') || strings.ContainsRune(got, '‮') {
+	if strings.ContainsRune(got, '\u009b') || strings.ContainsRune(got, '\u202e') {
 		t.Errorf("unsafe characters kept: %q", got)
 	}
 	if !strings.Contains(got, `  "b": [`) {

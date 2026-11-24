@@ -193,7 +193,7 @@ func TestContainerRemove(t *testing.T) {
 
 func readAllLogs(t *testing.T, rc io.ReadCloser, tty bool) (stdout, stderr string) {
 	t.Helper()
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	if tty {
 		b, err := io.ReadAll(rc)
 		if err != nil {
@@ -290,7 +290,9 @@ func TestContainerLogs(t *testing.T) {
 			errc <- err
 		}()
 		if viaClose {
-			rc.Close()
+			if err := rc.Close(); err != nil {
+				t.Errorf("close follower: %v", err)
+			}
 		} else {
 			cancel()
 		}

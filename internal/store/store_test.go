@@ -287,12 +287,12 @@ func TestContainerEventsRefreshUsageCounts(t *testing.T) {
 	t.Parallel()
 	f := populated()
 	_, rec := start(t, f, testConfig())
-	snap := rec.snapshot(t, "initial", nil)
+	rec.snapshot(t, "initial", nil)
 	rec.state(t, StateConnected)
 
 	img := f.AddImage(image.Summary{RepoTags: []string{"redis:7"}})
 	f.AddVolume(volume.Volume{Name: "cache"})
-	snap = rec.snapshot(t, "image and volume", func(s Snapshot) bool {
+	snap := rec.snapshot(t, "image and volume", func(s Snapshot) bool {
 		return hasVolume("cache")(s) && len(s.Images()) == 3
 	})
 	if snap.ImageUseCount(img) != 0 || snap.VolumeUseCount("cache") != 0 {

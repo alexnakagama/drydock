@@ -143,6 +143,21 @@ func TestRunServiceCreationFails(t *testing.T) {
 	checkOutput(t, "stderr", stderr.String(), "unable to parse docker host")
 }
 
+// failingWriter fails every write, like stdout redirected to a full disk or
+// a closed pipe.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, syscall.ENOSPC }
+
+func TestRunVersionWriteFails(t *testing.T) {
+	t.Parallel()
+	var stderr bytes.Buffer
+	if code := run(t.Context(), []string{"-version"}, failingWriter{}, &stderr, fakeDeps(t, nil)); code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	checkOutput(t, "stderr", stderr.String(), "drydock: write version: no space left on device")
+}
+
 func TestRunInterrupted(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -162,7 +177,7 @@ func TestRunTUIInterrupted(t *testing.T) {
 	// The input never delivers a key, so only cancellation (a signal in
 	// main) can end the program.
 	pr, pw := io.Pipe()
-	defer pw.Close()
+	defer func() { _ = pw.Close() }()
 	d := fakeDeps(t, dockerfake.New())
 	d.programOptions = tuiOptions(pr)
 	time.AfterFunc(200*time.Millisecond, cancel)
