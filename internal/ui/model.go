@@ -211,7 +211,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			cmd = m.setStatus(statusError, msg.Label+": "+msg.Reason)
 		} else {
-			cmd = m.setStatus(statusSuccess, msg.Label+": done")
+			detail := msg.Detail
+			if detail == "" {
+				detail = "done"
+			}
+			cmd = m.setStatus(statusSuccess, msg.Label+": "+detail)
 		}
 		return m, tea.Batch(cmd, m.broadcast(msg))
 
@@ -265,6 +269,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		inner := msg.msg
 		return m, tea.Batch(cmd, func() tea.Msg { return inner })
+	case trackProgressMsg:
+		if i := slices.IndexFunc(m.tasks, func(t task) bool { return t.id == msg.id }); i >= 0 {
+			m.tasks[i].text = msg.text
+		}
+		// Keep draining until the producer closes the channel, even once
+		// the task is done, so a pending receive never outlives it.
+		return m, listenProgress(msg.id, msg.progress)
 	case spinnerTickMsg:
 		m.spinnerLive = false
 		if len(m.tasks) == 0 {
@@ -511,7 +522,23 @@ func (m *Model) startTask(msg trackStartMsg) tea.Cmd {
 		}
 		return trackDoneMsg{id: id, msg: res}
 	}
-	return tea.Batch(run, m.tickSpinner())
+	return tea.Batch(run, m.tickSpinner(), listenProgress(id, msg.progress))
+}
+
+// listenProgress returns a command that waits for the next progress update
+// of task id, or nil if the task reports none. It returns no message once
+// the producer closes the channel.
+func listenProgress(id uint64, progress <-chan string) tea.Cmd {
+	if progress == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		text, ok := <-progress
+		if !ok {
+			return nil
+		}
+		return trackProgressMsg{id: id, text: text, progress: progress}
+	}
 }
 
 // tickSpinner schedules the next spinner frame unless one is scheduled.

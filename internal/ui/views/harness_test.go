@@ -41,6 +41,7 @@ type env struct {
 
 	// Recorded by the containers views the model creates.
 	containers []*containersView
+	images     []*imagesView
 	logs       []*logsView
 
 	execMu sync.Mutex
@@ -87,7 +88,11 @@ func newEnv(t *testing.T, f *dockerfake.Service, width, height int) *env {
 			e.containers = append(e.containers, v)
 			return v
 		}},
-		{Name: "images", Aliases: []string{"im"}, New: placeholderFactory("images")},
+		{Name: "images", Aliases: []string{"im"}, New: func(snap store.Snapshot) ui.View {
+			v := newImagesView(e.st, snap, imagesConfig{now: func() time.Time { return testNow }})
+			e.images = append(e.images, v)
+			return v
+		}},
 	}, "containers")
 	e.m.SetTimerFunc(func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil })
 
@@ -291,6 +296,18 @@ func (e *env) selectRow(name string) {
 		}
 	}
 	e.t.Fatalf("no row %s; screen:\n%s", name, e.screen())
+}
+
+// testNow is the reference time of views that display ages.
+var testNow = time.Date(2026, time.November, 24, 12, 0, 0, 0, time.UTC)
+
+// command runs a command-bar entry, for example "images".
+func (e *env) command(name string) {
+	e.t.Helper()
+	e.press(":")
+	e.typeText(name)
+	e.press("enter")
+	e.settle()
 }
 
 func checkGolden(t *testing.T, name, got string) {

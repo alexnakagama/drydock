@@ -1142,3 +1142,62 @@ func TestForegroundRunsOnlyWhenInFront(t *testing.T) {
 		t.Error("overlay closed")
 	}
 }
+
+func TestTrackProgressUpdatesIndicator(t *testing.T) {
+	h := newHarness(t)
+	progress := make(chan string, 1)
+	release := make(chan struct{})
+	work := func() tea.Msg {
+		<-release
+		close(progress)
+		return store.ActionResultMsg{Label: "pull redis:7"}
+	}
+	_, cmd := h.m.Update(trackStartMsg{text: "pulling redis:7", cmd: work, progress: progress})
+	if st := h.statusLine(); !strings.Contains(st, "pulling redis:7") {
+		t.Fatalf("status %q", st)
+	}
+	id := h.m.tasks[0].id
+
+	SendLatest(progress, "pulling redis:7: 1/3 layers")
+	SendLatest(progress, "pulling redis:7: 2/3 layers") // replaces the unread value
+	msg := listenProgress(id, progress)()
+	if p, ok := msg.(trackProgressMsg); !ok || p.text != "pulling redis:7: 2/3 layers" {
+		t.Fatalf("progress message %#v", msg)
+	}
+	_, next := h.m.Update(msg)
+	if next == nil {
+		t.Fatal("no further receive pending on the progress channel")
+	}
+	if st := h.statusLine(); !strings.Contains(st, "pulling redis:7: 2/3 layers") {
+		t.Errorf("status %q, want the latest progress", st)
+	}
+
+	close(release)
+	h.send(cmd)
+	if st := h.statusLine(); st != "✓ pull redis:7: done" {
+		t.Errorf("status after the task %q", st)
+	}
+	// The closed channel ends the pending receive without a message.
+	if msg := next(); msg != nil {
+		t.Errorf("receive after close returned %#v", msg)
+	}
+	// A late update for a finished task changes nothing.
+	h.m.Update(trackProgressMsg{id: id, text: "stale"})
+	if strings.Contains(h.statusLine(), "stale") {
+		t.Error("progress of a finished task shown")
+	}
+}
+
+func TestTrackWithoutProgressListensToNothing(t *testing.T) {
+	if listenProgress(1, nil) != nil {
+		t.Error("listenProgress(nil) returned a command")
+	}
+}
+
+func TestActionResultDetail(t *testing.T) {
+	h := newHarness(t)
+	h.update(store.ActionResultMsg{Label: "prune dangling images", Detail: "reclaimed 450MB"})
+	if st := h.statusLine(); st != "✓ prune dangling images: reclaimed 450MB" {
+		t.Errorf("status %q", st)
+	}
+}

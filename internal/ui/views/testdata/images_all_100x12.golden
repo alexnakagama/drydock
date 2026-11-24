@@ -1,0 +1,12 @@
+ drydock > images [all]                                                                 ● connected 
+REPOSITORY:TAG                                     ID            SIZE       CREATED           IN USE
+alpine:3.20                                        cccccccccccc  7.8MB      2 months ago      0     
+app:1.0                                            bbbbbbbbbbbb  52.3MB     3 days ago        0     
+app:latest                                         bbbbbbbbbbbb  52.3MB     3 days ago        0     
+nginx:1.27                                         aaaaaaaaaaaa  187MB      2 weeks ago       2     
+nginx:latest                                       aaaaaaaaaaaa  187MB      2 weeks ago       2     
+<none>:<none>                                      dddddddddddd  300MB      2 days ago        0     
+<none>:<none>                                      eeeeeeeeeeee  150MB      5 days ago        0     
+<none>:<none>                                      ffffffffffff  90MB       7 days ago        1     
+                                                                                                    
+ enter containers  d delete  i inspect  p pull  P prune dangling  a all/tagged  / filter  : command…

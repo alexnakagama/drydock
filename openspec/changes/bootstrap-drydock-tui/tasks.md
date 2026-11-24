@@ -42,12 +42,12 @@
 
 ## 6. Images
 
-- [ ] 6.1 Implement the images view (REPOSITORY:TAG one row per tag, short ID, human size, relative age, IN USE; dangling hidden by default with `a` toggle), and verify golden-file and unit tests for multi-tag and dangling cases
-- [ ] 6.2 Implement delete (`d`) by reference without force and with `PruneChildren: true`, with confirm listing in-use containers only when the reference is the last tag (otherwise stating only the tag is removed), and verify unit tests for unused, shared-tag (only that tag removed), untag-in-use-with-other-tags, and in-use-refused cases
-- [ ] 6.3 Wire `i` to the inspect view for images, and verify the breadcrumb `drydock > images > <ref> > inspect` in a unit test
-- [ ] 6.4 Implement pull (`p`): prompt, default `:latest` tag, anonymous pull, async progress decoding to an in-progress status, success/error reporting, Esc cancel, and verify unit tests with a fake progress stream plus a manual pull of `alpine:latest`
-- [ ] 6.5 Implement prune dangling (`P`): preview of dangling images with IN USE = 0 and their total size from snapshot, nothing-to-prune message, `ImagePrune` with `dangling=true` on confirm, reclaimed-space report, and verify unit tests for both branches and that a dangling image used by a stopped container is excluded
-- [ ] 6.6 Wire Enter to push the filtered containers view for the image, and verify a unit test for breadcrumb `drydock > images > <ref> > containers` and Esc return
+- [x] 6.1 Implement the images view (REPOSITORY:TAG one row per tag, short ID, human size, relative age, IN USE; dangling hidden by default with `a` toggle), and verify golden-file and unit tests for multi-tag and dangling cases
+- [x] 6.2 Implement delete (`d`) by reference without force and with `PruneChildren: true`, with confirm listing in-use containers only when the reference is the last tag (otherwise stating only the tag is removed), and verify unit tests for unused, shared-tag (only that tag removed), untag-in-use-with-other-tags, and in-use-refused cases
+- [x] 6.3 Wire `i` to the inspect view for images, and verify the breadcrumb `drydock > images > <ref> > inspect` in a unit test
+- [x] 6.4 Implement pull (`p`): prompt, default `:latest` tag, anonymous pull, async progress decoding to an in-progress status, success/error reporting, Esc cancel, and verify unit tests with a fake progress stream plus a manual pull of `alpine:latest`
+- [x] 6.5 Implement prune dangling (`P`): preview of dangling images with IN USE = 0 and their total size from snapshot, nothing-to-prune message, `ImagePrune` with `dangling=true` on confirm, reclaimed-space report, and verify unit tests for both branches and that a dangling image used by a stopped container is excluded
+- [x] 6.6 Wire Enter to push the filtered containers view for the image, and verify a unit test for breadcrumb `drydock > images > <ref> > containers` and Esc return
 
 ## 7. Volumes
 
