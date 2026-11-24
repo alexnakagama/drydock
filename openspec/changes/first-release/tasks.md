@@ -21,7 +21,7 @@
 
 ## 5. Documentation
 
-- [ ] 5.1 Update `README.md`: add a CI status badge, an "Install" section (download from GitHub Releases, verify with `checksums.txt`, the macOS quarantine note, plus `go install github.com/alexnakagama/drydock/cmd/drydock@latest`), refresh the stale status and "placeholder views" wording, and add a short "Releasing" section (`git tag vX.Y.Z && git push origin vX.Y.Z`). Under Development, list `golangci-lint run`. Verify: every command in the new sections runs as written, except the release push
+- [x] 5.1 Update `README.md`: add a CI status badge, an "Install" section (download from GitHub Releases, verify with `checksums.txt`, the macOS quarantine note, plus `go install github.com/alexnakagama/drydock/cmd/drydock@latest`), refresh the stale status and "placeholder views" wording, and add a short "Releasing" section (`git tag vX.Y.Z && git push origin vX.Y.Z`). Under Development, list `golangci-lint run`. Verify: every command in the new sections runs as written, except the release push
 
 ## 6. End-to-end verification
 

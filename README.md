@@ -1,17 +1,77 @@
 # drydock
 
+[![CI](https://github.com/alexnakagama/drydock/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/alexnakagama/drydock/actions/workflows/ci.yml)
+
 A terminal UI for managing a local Docker engine: containers, images and
 volumes, with live updates from the engine's event stream.
 
-> Status: early development. The application shell (navigation, command
-> bar, filtering, help, dialogs) is in place; the resource views are being
-> built incrementally (see `openspec/changes/bootstrap-drydock-tui`).
+drydock lists, filters and acts on containers (start, stop, restart, delete,
+logs, inspect, shell), images (pull, delete, inspect, prune) and volumes
+(create, delete, inspect, prune). It is pre-1.0: key bindings and behavior
+may still change between minor versions.
+
+## Install
+
+### Prebuilt binaries
+
+Each [GitHub Release](https://github.com/alexnakagama/drydock/releases)
+publishes a `tar.gz` archive per platform (Linux and macOS, `amd64` and
+`arm64`) and a `checksums.txt` file with their SHA-256 sums. The binaries are
+built with cgo disabled and need no libraries beyond the operating system.
+
+Download an archive and the checksums file, verify the archive, and install
+the binary. Set `VERSION` to the release you want (without the leading `v`),
+and `OS`/`ARCH` to your platform:
+
+```sh
+VERSION=0.1.0
+OS=linux      # linux or darwin
+ARCH=amd64    # amd64 or arm64
+archive="drydock_${VERSION}_${OS}_${ARCH}.tar.gz"
+base="https://github.com/alexnakagama/drydock/releases/download/v${VERSION}"
+
+# Each step runs only if the previous one succeeded: a failed download or a
+# checksum mismatch stops before anything is installed.
+# On macOS, replace `sha256sum -c -` with `shasum -a 256 -c -`.
+curl -fsSLO "$base/$archive" &&
+  curl -fsSLO "$base/checksums.txt" &&
+  awk -v f="$archive" '$2 == f' checksums.txt | sha256sum -c - &&
+  tar -xzf "$archive" drydock &&
+  sudo install -m 0755 drydock /usr/local/bin/drydock &&
+  drydock -version
+```
+
+If the checksum check fails, do not install the binary. The checksums detect a corrupted or tampered download, but they are
+published next to the archives, so they do not prove who built the release.
+Release binaries are not signed.
+
+**macOS:** the binaries are not signed or notarized. If you downloaded the
+archive with a browser, Gatekeeper quarantines the binary and refuses to run
+it. After verifying the checksum and installing, remove the quarantine
+attribute from the installed binary:
+
+```sh
+sudo xattr -d com.apple.quarantine /usr/local/bin/drydock
+```
+
+Downloads made with `curl` are not quarantined and need no extra step (the
+command then reports that the attribute does not exist, which is harmless).
+
+### With Go
+
+With Go 1.27 or newer:
+
+```sh
+go install github.com/alexnakagama/drydock/cmd/drydock@latest
+```
+
+This installs into `$(go env GOPATH)/bin`, which must be on your `PATH`.
 
 ## Requirements
 
-- **Go 1.27** or newer, to build from source.
-- **Linux.** macOS is expected to work but is not verified. Windows is not
-  supported.
+- **Linux or macOS.** Linux is the primary platform. On macOS, the unit
+  tests run in CI, but drydock is not tested against a real engine there.
+  Windows is not supported.
 - **Access to a Docker engine socket.** drydock talks to the engine directly
   through the Docker Engine Go SDK. The endpoint is resolved from
   `DOCKER_HOST` (with `DOCKER_TLS_VERIFY` and `DOCKER_CERT_PATH` for TLS), or
@@ -43,11 +103,10 @@ context, set `DOCKER_HOST` to that context's endpoint.
 Running `drydock` first checks that the engine is reachable (waiting at most
 5 seconds). If it cannot be reached, drydock prints the endpoint it tried and
 why (engine not running, permission denied, or timeout) and exits with status
-1. Otherwise it opens the full-screen terminal UI. The resource lists are
-still being built, so for now the containers, images and volumes views are
-placeholders. `q` or Ctrl+C quits with status 0 and restores the terminal.
+1. Otherwise it opens the full-screen terminal UI on the containers view.
+`q` or Ctrl+C quits with status 0 and restores the terminal.
 
-Run from a checkout:
+Building from source needs **Go 1.27** or newer. Run from a checkout:
 
 ```sh
 go run ./cmd/drydock
@@ -66,8 +125,7 @@ Install into `$(go env GOPATH)/bin`:
 go install ./cmd/drydock
 ```
 
-Keys of the application shell. List navigation and filtering apply to the
-resource lists, which replace the current placeholder views as they land:
+Global keys and list navigation (`?` shows every key of the current view):
 
 | Key      | Action                                                        |
 |----------|---------------------------------------------------------------|
@@ -77,6 +135,15 @@ resource lists, which replace the current placeholder views as they land:
 | `Esc`    | Clear the filter, otherwise go back to the previous view      |
 | `?`      | Help                                                          |
 | `q`      | Quit (Ctrl+C quits from anywhere, even inside a text input)   |
+
+Actions in the resource views. Delete and prune ask for confirmation first:
+
+| View       | Keys                                                               |
+|------------|--------------------------------------------------------------------|
+| Containers | `s` start/stop, `r` restart, `d` delete, `l` logs, `i` inspect, `x` shell, `a` all/running |
+| Images     | `Enter` containers using it, `p` pull, `d` delete, `i` inspect, `P` prune dangling, `a` all/tagged |
+| Volumes    | `Enter` containers using it, `c` create, `d` delete, `i` inspect, `P` prune unused |
+| Logs       | `G` follow, `/` search, `r` reopen an ended stream                 |
 
 Flags:
 
@@ -89,8 +156,19 @@ Flags:
 
 ```sh
 go build ./...
+gofmt -l .
 go vet ./...
+golangci-lint run ./...
 go test -race ./...
+```
+
+Linting uses [golangci-lint](https://golangci-lint.run/) v2 with the
+configuration in `.golangci.yml`. CI pins the version (see
+`GOLANGCI_LINT_VERSION` in `.github/workflows/ci.yml`); use the same one
+locally to get the same results. To also lint the integration tests:
+
+```sh
+golangci-lint run --build-tags integration ./...
 ```
 
 Integration tests run against a real engine and are opt-in, behind the
@@ -99,4 +177,44 @@ afterwards.
 
 ```sh
 go test -tags integration ./...
+```
+
+CI (`.github/workflows/ci.yml`) runs all of the above on every push to
+`master` and every pull request: lint, unit tests with `-race` on Linux and
+macOS, the integration tests on Linux, and a cross-compile of every release
+target with GoReleaser.
+
+## Releasing
+
+Releases are cut from `master` by pushing a semver tag:
+
+```sh
+git switch master && git pull --ff-only
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
+The tag push starts `.github/workflows/release.yml`. It runs the full CI
+suite on the tagged commit, refuses tags whose commit is not on `master`,
+checks that the binary reports exactly `drydock vX.Y.Z`, and then publishes a
+GitHub Release with GoReleaser (configuration in `.goreleaser.yaml`): the
+four archives, `checksums.txt` and a changelog generated from the commits
+since the previous tag. Tags with a pre-release suffix, such as
+`v0.2.0-rc.1`, are marked as pre-releases.
+
+If the workflow fails before the `goreleaser release` step, nothing is
+published. Delete the tag
+(`git tag -d vX.Y.Z && git push --delete origin vX.Y.Z`), fix the problem on
+`master`, and tag again.
+
+If it fails during or after that step, a GitHub Release may already be public.
+Delete the release and its tag
+(`gh release delete vX.Y.Z --cleanup-tag --yes && git tag -d vX.Y.Z`), fix the
+problem, and prefer releasing the next patch version over reusing the tag:
+users or the Go module proxy may already have fetched it.
+
+To check the release configuration locally without publishing anything:
+
+```sh
+goreleaser check
+goreleaser release --snapshot --clean
 ```
