@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -17,13 +18,30 @@ import (
 	"github.com/alexnakagama/drydock/internal/ui/keys"
 )
 
-// chromeLines is the number of lines around the content area: the header,
-// the status line and the footer.
-const chromeLines = 3
+// baseChromeLines is the number of lines around the content area that are
+// always drawn: the header, the status line and the footer. The resource
+// tab strip adds one more on terminals of at least minTabsHeight lines.
+const (
+	baseChromeLines = 3
+	minTabsHeight   = 5
+)
+
+// showTabs reports whether the resource tab strip is drawn. It is left out
+// on very short terminals, so the header, status line and footer keep
+// their lines.
+func (m *Model) showTabs() bool { return m.height >= minTabsHeight }
+
+// chromeLines returns the number of lines around the content area.
+func (m *Model) chromeLines() int {
+	if m.showTabs() {
+		return baseChromeLines + 1
+	}
+	return baseChromeLines
+}
 
 // contentSize returns the size of the area views render into.
 func (m *Model) contentSize() (int, int) {
-	return m.width, max(m.height-chromeLines, 0)
+	return m.width, max(m.height-m.chromeLines(), 0)
 }
 
 // View implements tea.Model.
@@ -34,8 +52,9 @@ func (m *Model) View() tea.View {
 	return v
 }
 
-// render draws the full screen: header, content (with any overlay on top),
-// status line and footer, each fitted to the terminal width.
+// render draws the full screen: header, resource tabs, content (with any
+// overlay on top), status line and footer, each fitted to the terminal
+// width.
 func (m *Model) render() string {
 	if m.quitting || len(m.stack) == 0 || m.width <= 0 || m.height <= 0 {
 		return ""
@@ -48,6 +67,9 @@ func (m *Model) render() string {
 
 	lines := make([]string, 0, m.height)
 	lines = append(lines, m.headerView())
+	if m.showTabs() {
+		lines = append(lines, m.tabsView())
+	}
 	if ch > 0 {
 		lines = append(lines, padLines(content, m.width, ch)...)
 	}
@@ -86,6 +108,85 @@ func (m *Model) headerView() string {
 		}
 	}
 	return components.Fit(" "+left, gap) + right + " "
+}
+
+// tabsView renders the resource tab strip, with the top view's list
+// position right-aligned on the same line. The position always wins: the
+// tabs get what is left, with each label shortened to its first alias if
+// the full labels do not fit, and are clipped if even those do not.
+func (m *Model) tabsView() string {
+	right := m.positionView()
+	if right != "" {
+		right += " "
+	}
+	rw := ansi.StringWidth(right)
+	// One leading space and one space between the tabs and the position.
+	avail := m.width - rw - 2
+	if right == "" {
+		avail = m.width - 1
+	}
+	if avail < 1 {
+		// No room for any tab. The position is right-aligned and is only cut
+		// (with an ellipsis) if it is wider than the terminal itself.
+		return components.Fit(strings.Repeat(" ", max(m.width-rw, 0))+right, m.width)
+	}
+	tabs := m.tabLabels(false)
+	if ansi.StringWidth(tabs) > avail {
+		tabs = m.tabLabels(true)
+	}
+	if right == "" {
+		return " " + components.Fit(tabs, avail)
+	}
+	return " " + components.Fit(tabs, avail) + " " + right
+}
+
+// tabLabels renders every resource tab: its number (if a key selects it),
+// its name (or, if short, its first alias) and its count once the first
+// snapshot has loaded. The tab of the stack's root resource is highlighted.
+func (m *Model) tabLabels(short bool) string {
+	st := components.Styles
+	numbered := len(keys.Global.TabKeys())
+	parts := make([]string, 0, len(m.resources))
+	for i, r := range m.resources {
+		var label []string
+		if i < numbered {
+			label = append(label, strconv.Itoa(i+1))
+		}
+		name := r.Name
+		if short && len(r.Aliases) > 0 {
+			name = r.Aliases[0]
+		}
+		label = append(label, components.Clean(name))
+		if r.Count != nil && m.snap.Loaded() {
+			label = append(label, strconv.Itoa(r.Count(m.snap)))
+		}
+		style := st.Tab
+		if i == m.rootIdx {
+			style = st.TabActive
+		}
+		parts = append(parts, style.Render(strings.Join(label, " ")))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// positionView renders the top view's list position, or "" if the top view
+// does not report one.
+func (m *Model) positionView() string {
+	p, ok := m.top().(Positioner)
+	if !ok {
+		return ""
+	}
+	return components.Styles.Position.Render(formatPosition(p.Position()))
+}
+
+// formatPosition formats a list position as "3/12", or "3/5 of 12" while a
+// filter is applied.
+func formatPosition(selected, listed, total int, filtered bool) string {
+	s := strconv.Itoa(selected) + "/" + strconv.Itoa(listed)
+	if filtered {
+		s += " of " + strconv.Itoa(total)
+	}
+	return s
 }
 
 // connectionView renders the connection state, as a single symbol if
@@ -137,8 +238,19 @@ func (m *Model) statusView() string {
 	return components.Fit(" "+strings.Join(parts, "  ·  "), m.width)
 }
 
+// moreHint ends a footer that could not fit every hint; `?` opens the help
+// overlay, which lists them all. It is display-only (keys.Global.Help is
+// what matches `?`), but needs a key to report itself enabled.
+var moreHint = key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "more"))
+
+// hintSep separates footer hints.
+const hintSep = "  "
+
 // footerView renders the key hints: the text-input keys while an input is
-// focused, otherwise the top view's keys followed by the global ones.
+// focused, otherwise the top view's enabled keys followed by the global
+// ones. Hints are never cut: if they do not all fit, the global hints are
+// dropped, the view's are kept in priority order while they fit, and
+// `? more` ends the line.
 func (m *Model) footerView() string {
 	var bs []key.Binding
 	switch {
@@ -148,12 +260,35 @@ func (m *Model) footerView() string {
 		bs = []key.Binding{keys.Global.Help, keys.Global.Back}
 		bs[1].SetHelp("esc", "close")
 	default:
-		bs = slices.Concat(m.top().KeyHelp(), []key.Binding{keys.Global.Command, keys.Global.Help, keys.Global.Quit})
+		return components.Fit(" "+fitHints(hints(m.top().KeyHelp()), m.width-1), m.width)
 	}
-	return components.Fit(" "+hints(bs), m.width)
+	return components.Fit(" "+strings.Join(hints(bs), hintSep), m.width)
 }
 
-func hints(bs []key.Binding) string {
+// fitHints joins the view hints and the global hints if they fit in width
+// cells. Otherwise it joins as many leading view hints as fit with
+// `? more` after them.
+func fitHints(view []string, width int) string {
+	global := hints([]key.Binding{keys.Global.Command, keys.Global.Help, keys.Global.Quit})
+	if all := strings.Join(slices.Concat(view, global), hintSep); ansi.StringWidth(all) <= width {
+		return all
+	}
+	more := hints([]key.Binding{moreHint})[0]
+	used := ansi.StringWidth(more)
+	var kept []string
+	for _, h := range view {
+		w := ansi.StringWidth(h) + len(hintSep)
+		if used+w > width {
+			break
+		}
+		kept = append(kept, h)
+		used += w
+	}
+	return strings.Join(append(kept, more), hintSep)
+}
+
+// hints renders one footer segment per enabled binding that has help.
+func hints(bs []key.Binding) []string {
 	st := components.Styles
 	parts := make([]string, 0, len(bs))
 	for _, b := range bs {
@@ -161,9 +296,9 @@ func hints(bs []key.Binding) string {
 		if !b.Enabled() || h.Key == "" {
 			continue
 		}
-		parts = append(parts, st.FooterKey.Render(h.Key)+" "+st.FooterDesc.Render(h.Desc))
+		parts = append(parts, st.FooterKey.Render(components.Clean(h.Key))+" "+st.FooterDesc.Render(components.Clean(h.Desc)))
 	}
-	return strings.Join(parts, "  ")
+	return parts
 }
 
 // overlayView renders the open dialog, or "" if none is open (the command
@@ -180,16 +315,25 @@ func (m *Model) overlayView() string {
 	return ""
 }
 
+// helpKeyWidth is the width of the help overlay's key column.
+const helpKeyWidth = 10
+
 func (m *Model) helpView() string {
 	st := components.Styles
+	// Bindings whose action does not apply right now are listed dimmed.
 	section := func(title string, bs []key.Binding) []string {
 		out := []string{st.HelpSection.Render(title)}
 		for _, b := range bs {
 			h := b.Help()
-			if !b.Enabled() || h.Key == "" {
+			if h.Key == "" {
 				continue
 			}
-			out = append(out, st.HelpKey.Render(components.Fit(h.Key, 8))+" "+h.Desc)
+			k, desc := components.Fit(components.Clean(h.Key), helpKeyWidth), components.Clean(h.Desc)
+			if b.Enabled() {
+				out = append(out, st.HelpKey.Render(k)+" "+desc)
+			} else {
+				out = append(out, st.FooterDesc.Render(k)+" "+st.FooterDesc.Render(desc))
+			}
 		}
 		return out
 	}
@@ -202,7 +346,8 @@ func (m *Model) helpView() string {
 		lines = append(lines, "")
 		lines = append(lines, section(viewName, vk)...)
 	}
-	lines = append(lines, "", st.DialogHint.Render("? or esc to close"))
+	// No blank line before the hint: the containers help must fit 80x24.
+	lines = append(lines, st.DialogHint.Render("? or esc to close"))
 	return st.Dialog.Render(strings.Join(lines, "\n"))
 }
 

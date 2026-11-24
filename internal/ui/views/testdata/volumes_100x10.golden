@@ -1,10 +1,10 @@
  drydock > volumes                                                                      ● connected 
+ 1 containers 2  2 images 0  3 volumes 5                                                        1/5 
 NAME                                DRIVER      MOUNTPOINT                                    IN USE
 777777777777777777777777777777777…  local       /var/lib/docker/volumes/7777777777777777777…  0     
 cache-data                          local       /var/lib/docker/volumes/cache-data/_data      0     
 pgdata                              local       /var/lib/docker/volumes/pgdata/_data          1     
 shared                              local       /var/lib/docker/volumes/shared/_data          2     
 tmp1                                local       /var/lib/docker/volumes/tmp1/_data            0     
-                                                                                                    
                                                                                                     
  i inspect  c create  d delete  / filter  P prune unused  : command  ? help  q quit                 

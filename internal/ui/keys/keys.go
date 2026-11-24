@@ -12,7 +12,31 @@ type GlobalMap struct {
 	// ForceQuit quits from anywhere, even with an overlay or a text input
 	// focused. It is not shown in the footer.
 	ForceQuit key.Binding
+
+	// Tab1, Tab2 and Tab3 switch to the resource with that number, and
+	// NextTab and PrevTab cycle through the resources. They are used only
+	// for matching and have no help: SwitchHelp documents them all.
+	Tab1    key.Binding
+	Tab2    key.Binding
+	Tab3    key.Binding
+	NextTab key.Binding
+	PrevTab key.Binding
+	// SwitchHelp is display-only: it lists the resource-switching keys as a
+	// single help entry. It carries their keys only because a binding
+	// without keys reports itself disabled; the root matches the individual
+	// bindings above, never this one.
+	SwitchHelp key.Binding
 }
+
+// The resource-switching keys, shared by the bindings that match them and
+// by SwitchHelp, so the help cannot drift from what is matched. They are
+// reserved: no view may bind them, since the root takes them first.
+var (
+	tabKeys    = [...]string{"1", "2", "3"}
+	nextTabKey = "tab"
+	prevTabKey = "shift+tab"
+	switchKeys = []string{tabKeys[0], tabKeys[1], tabKeys[2], nextTabKey, prevTabKey}
+)
 
 // Global is the global keymap.
 var Global = GlobalMap{
@@ -21,11 +45,25 @@ var Global = GlobalMap{
 	Back:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	Quit:      key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	ForceQuit: key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+
+	Tab1:       key.NewBinding(key.WithKeys(tabKeys[0])),
+	Tab2:       key.NewBinding(key.WithKeys(tabKeys[1])),
+	Tab3:       key.NewBinding(key.WithKeys(tabKeys[2])),
+	NextTab:    key.NewBinding(key.WithKeys(nextTabKey)),
+	PrevTab:    key.NewBinding(key.WithKeys(prevTabKey)),
+	SwitchHelp: key.NewBinding(key.WithKeys(switchKeys...), key.WithHelp("1-3/tab", "switch resource")),
 }
 
-// Bindings returns the global bindings in display order.
+// Bindings returns the global bindings in display order. The
+// resource-switching keys appear once, as SwitchHelp.
 func (m GlobalMap) Bindings() []key.Binding {
-	return []key.Binding{m.Command, m.Help, m.Back, m.Quit, m.ForceQuit}
+	return []key.Binding{m.Command, m.SwitchHelp, m.Help, m.Back, m.Quit, m.ForceQuit}
+}
+
+// TabKeys returns the keys that jump to a resource, in resource order: the
+// first selects resource 0.
+func (m GlobalMap) TabKeys() []key.Binding {
+	return []key.Binding{m.Tab1, m.Tab2, m.Tab3}
 }
 
 // TableMap holds the navigation and filter keys shared by every list view.

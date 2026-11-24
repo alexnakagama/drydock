@@ -88,17 +88,17 @@ func newEnv(t *testing.T, f *dockerfake.Service, width, height int) *env {
 			e.wrapLogs(v)
 			e.containers = append(e.containers, v)
 			return v
-		}},
+		}, Count: store.Snapshot.NumContainers},
 		{Name: "images", Aliases: []string{"im"}, New: func(snap store.Snapshot) ui.View {
 			v := newImagesView(e.st, snap, imagesConfig{now: func() time.Time { return testNow }})
 			e.images = append(e.images, v)
 			return v
-		}},
+		}, Count: store.Snapshot.NumImages},
 		{Name: "volumes", Aliases: []string{"vol"}, New: func(snap store.Snapshot) ui.View {
 			v := newVolumesView(e.st, snap)
 			e.volumes = append(e.volumes, v)
 			return v
-		}},
+		}, Count: store.Snapshot.NumVolumes},
 	}, "containers")
 	e.m.SetTimerFunc(func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil })
 
@@ -258,15 +258,19 @@ func (e *env) statusLine() string {
 	return strings.TrimSpace(ls[len(ls)-2])
 }
 
-// content returns the lines of the content area (between the header and
-// the status line), right-trimmed.
+// content returns the lines of the content area (between the header, or
+// the resource tab strip below it, and the status line), right-trimmed.
 func (e *env) content() []string {
 	ls := e.lines()
-	if len(ls) < 3 {
+	first := 1
+	if len(ls) >= 5 { // the tab strip is shown from 5 lines
+		first = 2
+	}
+	if len(ls) < first+2 {
 		return nil
 	}
-	out := make([]string, 0, len(ls)-3)
-	for _, l := range ls[1 : len(ls)-2] {
+	out := make([]string, 0, len(ls)-first-2)
+	for _, l := range ls[first : len(ls)-2] {
 		out = append(out, strings.TrimRight(l, " "))
 	}
 	return out

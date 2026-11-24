@@ -31,7 +31,7 @@ See proposal.md for motivation and specs/tui-navigation/spec.md for the required
 
 The strip renders `1 containers 12  2 images 34  3 volumes 5`. The active tab uses the accent style, bold. The others are muted. Each tab's short form is the resource's first alias, or its name if it has no alias. The strip uses the short forms when the full form does not fit.
 
-The position indicator (D4) is right-aligned on this same line, and it always wins. The strip gets `width - width(position) - 2` cells, and anything that still does not fit is clipped with `Fit`.
+The position indicator (D4) is right-aligned on this same line, and it always wins. The line is a leading space, the strip, a one-cell gap, the position and a trailing space, so the strip gets `width - width(position) - 3` cells. Anything that still does not fit is clipped with `Fit`. Only a terminal narrower than the position itself cuts the position.
 
 *Alternative:* merge the tabs into the header next to the breadcrumb. Rejected: the header already carries the breadcrumb, the indicators and the connection state, and would overflow on narrow terminals.
 

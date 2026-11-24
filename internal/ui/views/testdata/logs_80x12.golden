@@ -1,5 +1,5 @@
  drydock > containers > web > logs [following]                      ● connected 
-line 11                                                                         
+ 1 containers 1  2 images 0  3 volumes 0                                        
 line 12                                                                         
 line 13                                                                         
 line 14                                                                         
@@ -9,4 +9,4 @@ line 17
 line 18                                                                         
 line 19                                                                         
                                                                                 
- G follow  / search  ↑/k up  ↓/j down  pgup page up  pgdn page down  g top  ← s…
+ G follow  / search  ↑/k up  ↓/j down  pgup page up  pgdn page down  ? more     
