@@ -95,7 +95,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, d deps) i
 	fs := flag.NewFlagSet("drydock", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprint(fs.Output(), "Usage: drydock [flags]\n\n"+
+		_, _ = fmt.Fprint(fs.Output(), "Usage: drydock [flags]\n\n"+
 			"A terminal UI for managing a local Docker engine.\n"+
 			"The engine endpoint is taken from DOCKER_HOST, DOCKER_TLS_VERIFY and\n"+
 			"DOCKER_CERT_PATH, or the default local socket.\n\nFlags:\n")
@@ -110,22 +110,29 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, d deps) i
 		return exitUsage
 	}
 	if fs.NArg() > 0 {
-		fmt.Fprintf(stderr, "drydock: unexpected argument %q\n", docker.SanitizeText(fs.Arg(0)))
+		_, _ = fmt.Fprintf(stderr, "drydock: unexpected argument %q\n", docker.SanitizeText(fs.Arg(0)))
 		fs.Usage()
 		return exitUsage
 	}
 
 	if *showVersion {
-		fmt.Fprintf(stdout, "drydock %s\n", version())
+		if _, err := fmt.Fprintf(stdout, "drydock %s\n", version()); err != nil {
+			// stdout is the requested output; failing to write it (for
+			// example a closed pipe or a full disk) is an error.
+			_, _ = fmt.Fprintf(stderr, "drydock: write version: %s\n", docker.SanitizeText(err.Error()))
+			return exitError
+		}
 		return exitOK
 	}
 
 	svc, err := d.newService()
 	if err != nil {
-		fmt.Fprintf(stderr, "drydock: %s\n", docker.SanitizeText(err.Error()))
+		_, _ = fmt.Fprintf(stderr, "drydock: %s\n", docker.SanitizeText(err.Error()))
 		return exitError
 	}
-	defer svc.Close()
+	// Closing only releases idle connections on the way out; there is
+	// nothing useful to do with a failure at that point.
+	defer func() { _ = svc.Close() }()
 
 	if code, ok := checkConnection(ctx, svc, stderr, d.pingTimeout); !ok {
 		return code
@@ -138,7 +145,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, d deps) i
 	case ctx.Err() != nil:
 		return exitInterrupted
 	default:
-		fmt.Fprintf(stderr, "drydock: %s\n", docker.ErrorText(svc.Host(), err))
+		_, _ = fmt.Fprintf(stderr, "drydock: %s\n", docker.ErrorText(svc.Host(), err))
 		return exitError
 	}
 }
@@ -192,13 +199,13 @@ func checkConnection(ctx context.Context, svc docker.Service, stderr io.Writer, 
 	}
 	if ctx.Err() != nil {
 		// Interrupted by the user, not a connection problem.
-		fmt.Fprintln(stderr, "drydock: interrupted")
+		_, _ = fmt.Fprintln(stderr, "drydock: interrupted")
 		return exitInterrupted, false
 	}
 	if errors.Is(err, context.DeadlineExceeded) || pctx.Err() != nil {
 		err = context.DeadlineExceeded
 	}
-	fmt.Fprintf(stderr, "drydock: %s\n", docker.ConnectErrorMessage(svc.Host(), err, timeout))
+	_, _ = fmt.Fprintf(stderr, "drydock: %s\n", docker.ConnectErrorMessage(svc.Host(), err, timeout))
 	return exitError, false
 }
 

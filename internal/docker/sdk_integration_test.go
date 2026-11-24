@@ -48,7 +48,7 @@ func TestIntegrationPingNegotiatesVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 

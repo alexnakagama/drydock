@@ -90,7 +90,7 @@ func (r *liveRecorder) waitFor(t *testing.T, timeout time.Duration, what string,
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	for {
-		snap, state, reason := r.current()
+		snap, state, _ := r.current()
 		if state == StateConnected && snap.Loaded() && cond(snap) {
 			return time.Since(start)
 		}
@@ -99,7 +99,7 @@ func (r *liveRecorder) waitFor(t *testing.T, timeout time.Duration, what string,
 		case <-deadline.C:
 			// A message may have arrived together with the deadline; judge
 			// (and report) the latest state, not the one read above.
-			snap, state, reason = r.current()
+			snap, state, reason := r.current()
 			if state == StateConnected && snap.Loaded() && cond(snap) {
 				return time.Since(start)
 			}
@@ -170,7 +170,7 @@ var cliEnv = sync.OnceValues(func() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve engine endpoint: %w", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 	env := slices.DeleteFunc(os.Environ(), func(kv string) bool {
 		k, _, _ := strings.Cut(kv, "=")
 		return k == "DOCKER_HOST" || k == "DOCKER_CONTEXT"

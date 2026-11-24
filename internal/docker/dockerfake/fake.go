@@ -201,7 +201,7 @@ func (s *Service) Disconnect(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err == nil {
-		err = fmt.Errorf("Cannot connect to the Docker daemon at %s. Is the docker daemon running?", s.host)
+		err = fmt.Errorf("Cannot connect to the Docker daemon at %s. Is the docker daemon running?", s.host) //nolint:staticcheck // ST1005: verbatim Docker client text, classified by internal/docker/errors.go
 	}
 	s.connected = false
 	s.connErr = err
@@ -1217,7 +1217,7 @@ func (p *pullStream) Close() error {
 
 func (p *pullStream) Messages(ctx context.Context) iter.Seq2[jsonstream.Message, error] {
 	return func(yield func(jsonstream.Message, error) bool) {
-		defer p.Close()
+		defer func() { _ = p.Close() }() // Close never fails
 		aborted := func() error {
 			select {
 			case <-ctx.Done():
@@ -1517,7 +1517,7 @@ func isHex(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if !('0' <= r && r <= '9' || 'a' <= r && r <= 'f') {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
 			return false
 		}
 	}

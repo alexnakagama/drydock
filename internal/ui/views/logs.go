@@ -248,9 +248,10 @@ func (v *logsView) read(ctx context.Context, out chan<- string) error {
 		if err != nil {
 			return err
 		}
-		defer rc.Close()
+		// Close errors are ignored: the stream is being abandoned either way.
+		defer func() { _ = rc.Close() }()
 		// Unblock a pending Read as soon as the view is closed.
-		stop := context.AfterFunc(ctx, func() { rc.Close() })
+		stop := context.AfterFunc(ctx, func() { _ = rc.Close() })
 		defer stop()
 
 		w := &lineWriter{max: v.cfg.maxLineLen, emit: func(line string) bool {

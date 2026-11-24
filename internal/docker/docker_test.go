@@ -177,8 +177,8 @@ func TestConnectErrorMessage(t *testing.T) {
 	}
 
 	// Credentials in the endpoint and terminal escapes in errors are not printed.
-	msg = ConnectErrorMessage("tcp://user:secret@10.0.0.1:2376", errors.New("bad \x1b[31mthing‮"), time.Second)
-	if strings.Contains(msg, "secret") || strings.ContainsAny(msg, "\x1b‮") {
+	msg = ConnectErrorMessage("tcp://user:secret@10.0.0.1:2376", errors.New("bad \x1b[31mthing\u202e"), time.Second)
+	if strings.Contains(msg, "secret") || strings.ContainsAny(msg, "\x1b\u202e") {
 		t.Errorf("message leaks credentials or control characters: %q", msg)
 	}
 	if !strings.Contains(msg, "tcp://10.0.0.1:2376") {
@@ -213,7 +213,7 @@ func TestSanitizeText(t *testing.T) {
 		"esc\x1b[2Jclear":     "esc�[2Jclear",
 		"c1 \u009b csi":       "c1 � csi",
 		"bell\a del\x7f":      "bell� del�",
-		"rtl ‮override":       "rtl �override",
+		"rtl \u202eoverride":  "rtl �override",
 		"cr\rcarriage":        "cr�carriage",
 		"unicode ünïcödé 日本語": "unicode ünïcödé 日本語",
 	}

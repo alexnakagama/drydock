@@ -6,8 +6,8 @@
 
 ## 2. Linting
 
-- [ ] 2.1 Add `.golangci.yml` (v2 format, `standard` linters plus the `gofmt` formatter) as described in design.md §3. Verify: `golangci-lint config verify` succeeds
-- [ ] 2.2 Run `golangci-lint run ./...` and `golangci-lint run --build-tags integration ./...` locally. Fix every finding, or exclude it narrowly with a comment giving the reason. Verify: both commands exit 0 and `go test -race ./...` still passes
+- [x] 2.1 Add `.golangci.yml` (v2 format, `standard` linters plus the `gofmt` formatter) as described in design.md §3. Verify: `golangci-lint config verify` succeeds
+- [x] 2.2 Run `golangci-lint run ./...` and `golangci-lint run --build-tags integration ./...` locally. Fix every finding, or exclude it narrowly with a comment giving the reason. Verify: both commands exit 0 and `go test -race ./...` still passes
 
 ## 3. CI workflow
 
