@@ -60,6 +60,6 @@
 
 ## 8. Integration checks
 
-- [ ] 8.1 Add `integration`-tagged end-to-end tests against a real engine that create labeled resources, assert they appear in store snapshots within 2 seconds of external changes, and clean up, and verify `go test -tags integration ./...` passes locally
+- [x] 8.1 Add `integration`-tagged end-to-end tests against a real engine that create labeled resources, assert they appear in store snapshots within 2 seconds of external changes, and clean up, and verify `go test -tags integration ./...` passes locally
 - [ ] 8.2 Manually verify engine restart recovery: run drydock, `sudo systemctl restart docker`, confirm the disconnected indicator appears and clears with lists reloaded
-- [ ] 8.3 Run `go vet ./...` and `go test -race ./...`, and verify both pass with no data races reported
+- [x] 8.3 Run `go vet ./...` and `go test -race ./...`, and verify both pass with no data races reported
