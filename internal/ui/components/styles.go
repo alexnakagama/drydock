@@ -34,6 +34,9 @@ type StyleSet struct {
 	TableHeader   lipgloss.Style
 	TableSelected lipgloss.Style
 	Empty         lipgloss.Style
+	RowGood       lipgloss.Style // unselected row with ToneGood
+	RowWarn       lipgloss.Style // unselected row with ToneWarn
+	RowDim        lipgloss.Style // unselected row with ToneDim
 
 	// Overlays and inputs.
 	Dialog      lipgloss.Style
@@ -63,6 +66,9 @@ var Styles = StyleSet{
 	TableHeader:   lipgloss.NewStyle().Bold(true).Foreground(colorMuted),
 	TableSelected: lipgloss.NewStyle().Reverse(true),
 	Empty:         lipgloss.NewStyle().Foreground(colorMuted).Italic(true),
+	RowGood:       lipgloss.NewStyle().Foreground(colorSuccess),
+	RowWarn:       lipgloss.NewStyle().Foreground(colorWarn),
+	RowDim:        lipgloss.NewStyle().Foreground(colorMuted),
 
 	Dialog: lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

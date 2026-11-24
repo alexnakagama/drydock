@@ -26,6 +26,18 @@ type Column struct {
 	Filter bool
 }
 
+// Tone colors an unselected row by its resource's state. The selected row
+// is always rendered with the selection style alone.
+type Tone uint8
+
+// Row tones. The zero value is ToneDefault.
+const (
+	ToneDefault Tone = iota // the terminal's default color
+	ToneGood                // healthy, for example a running container
+	ToneWarn                // needs attention, for example a paused container
+	ToneDim                 // inactive, for example an exited container
+)
+
 // Row is one table row.
 type Row struct {
 	// Key identifies the resource shown by the row (for example a container
@@ -35,6 +47,8 @@ type Row struct {
 	// Cells holds one value per column. Values are untrusted: the table
 	// cleans them (see Clean) before rendering.
 	Cells []string
+	// Tone colors the row while it is not selected.
+	Tone Tone
 }
 
 // Table is a scrollable, filterable list with a selection that follows its
@@ -119,6 +133,21 @@ func (t *Table) Select(rowKey string) bool {
 
 // Len returns the number of rows shown (after filtering).
 func (t *Table) Len() int { return len(t.visible) }
+
+// Position reports where the selection is: selected is the 1-based index
+// of the selected row among the listed rows (0 when none is listed), listed
+// is the number of rows shown after filtering, total is the number of rows
+// before filtering, and filtered reports whether a non-blank filter is
+// applied (including one still being typed).
+func (t *Table) Position() (selected, listed, total int, filtered bool) {
+	listed = len(t.visible)
+	if listed > 0 {
+		selected = t.cursor + 1
+	}
+	// Match refilter: a whitespace-only filter (possible while typing)
+	// narrows nothing, so it does not count as applied.
+	return selected, listed, len(t.all), strings.TrimSpace(t.filter) != ""
+}
 
 // Filter returns the applied filter text, or "" if none.
 func (t *Table) Filter() string { return t.filter }
@@ -369,9 +398,14 @@ func (t *Table) View() string {
 		lines = append(lines, Styles.Empty.Render(Fit(" "+Clean(msg), t.width)))
 	}
 	for i := t.offset; i < len(t.visible) && i < t.offset+body; i++ {
-		line := t.renderLine(t.visible[i].Cells, ws)
+		r := t.visible[i]
+		line := t.renderLine(r.Cells, ws)
 		if i == t.cursor {
+			// The selection is plain reverse video of the untoned line:
+			// reversing a toned line would turn the tone into the background.
 			line = Styles.TableSelected.Render(line)
+		} else {
+			line = toneStyle(r.Tone, line)
 		}
 		lines = append(lines, line)
 	}
@@ -382,6 +416,21 @@ func (t *Table) View() string {
 		lines = append(lines, Fit(t.input.View(), t.width))
 	}
 	return strings.Join(lines[:min(len(lines), t.height)], "\n")
+}
+
+// toneStyle renders an unselected row line in its tone's style. Unknown
+// tones render like ToneDefault.
+func toneStyle(tone Tone, line string) string {
+	switch tone {
+	case ToneGood:
+		return Styles.RowGood.Render(line)
+	case ToneWarn:
+		return Styles.RowWarn.Render(line)
+	case ToneDim:
+		return Styles.RowDim.Render(line)
+	default:
+		return line
+	}
 }
 
 func boolInt(b bool) int {

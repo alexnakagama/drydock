@@ -345,3 +345,117 @@ func TestSetRowsCopiesTheSlice(t *testing.T) {
 		t.Errorf("table follows the caller's slice: selected %q", r.Key)
 	}
 }
+
+func TestTableRowTones(t *testing.T) {
+	rows := []Row{
+		{Key: "a", Cells: []string{"alpha", "img", "up"}, Tone: ToneGood},
+		{Key: "b", Cells: []string{"bravo", "img", "paused"}, Tone: ToneWarn},
+		{Key: "c", Cells: []string{"charlie", "img", "exited"}, Tone: ToneDim},
+		{Key: "d", Cells: []string{"delta", "img", "removing"}},
+		{Key: "e", Cells: []string{"echo", "img", "?"}, Tone: Tone(99)}, // unknown tone
+	}
+	tb := newTestTable(rows...)
+	press(t, &tb, "j") // select b, so a, c and d are unselected
+	ws := tb.widths()
+	plain := func(i int) string { return tb.renderLine(rows[i].Cells, ws) }
+	lines := strings.Split(tb.View(), "\n")
+
+	want := []string{
+		Styles.RowGood.Render(plain(0)),
+		Styles.TableSelected.Render(plain(1)),
+		Styles.RowDim.Render(plain(2)),
+		plain(3),
+		plain(4),
+	}
+	for i, w := range want {
+		if got := lines[i+1]; got != w {
+			t.Errorf("row %q rendered %q, want %q", rows[i].Key, got, w)
+		}
+	}
+	// The styles must actually differ, or the comparisons above prove nothing.
+	if Styles.RowDim.Render(plain(2)) == plain(2) || Styles.RowGood.Render(plain(0)) == plain(0) {
+		t.Fatal("tone styles render rows unchanged")
+	}
+
+	// A dimmed row, once selected, is the plain selection of the untoned line.
+	press(t, &tb, "j") // select c
+	lines = strings.Split(tb.View(), "\n")
+	if got, w := lines[3], Styles.TableSelected.Render(plain(2)); got != w {
+		t.Errorf("selected dimmed row rendered %q, want %q", got, w)
+	}
+	if got, w := lines[2], Styles.RowWarn.Render(plain(1)); got != w {
+		t.Errorf("unselected warn row rendered %q, want %q", got, w)
+	}
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w != 60 {
+			t.Errorf("line %d is %d cells wide, want 60", i, w)
+		}
+	}
+}
+
+func TestTablePosition(t *testing.T) {
+	type pos struct {
+		selected, listed, total int
+		filtered                bool
+	}
+	get := func(tb *Table) pos {
+		s, l, n, f := tb.Position()
+		return pos{s, l, n, f}
+	}
+	var rows []Row
+	for i, n := range []string{"web1", "web2", "web3", "web4", "web5", "db1", "db2", "db3", "db4", "db5", "db6", "db7"} {
+		rows = append(rows, row(string(rune('a'+i)), n, "img", ""))
+	}
+	filtered := func(f string) *Table {
+		tb := newTestTable(rows...)
+		press(t, &tb, "/")
+		typeText(&tb, f)
+		press(t, &tb, "enter")
+		return &tb
+	}
+
+	unfiltered := newTestTable(rows...)
+	press(t, &unfiltered, "j", "j")
+	empty := newTestTable()
+
+	cases := []struct {
+		name string
+		tb   *Table
+		want pos
+	}{
+		{"unfiltered", &unfiltered, pos{3, 12, 12, false}},
+		{"filtered", filtered("web"), pos{1, 5, 12, true}},
+		{"filter matching nothing", filtered("zzz"), pos{0, 0, 12, true}},
+		{"filter matching all rows", filtered("img"), pos{1, 12, 12, true}},
+		{"empty without a filter", &empty, pos{0, 0, 0, false}},
+	}
+	for _, c := range cases {
+		if got := get(c.tb); got != c.want {
+			t.Errorf("%s: Position() = %+v, want %+v", c.name, got, c.want)
+		}
+	}
+
+	// A whitespace-only filter, still being typed, narrows nothing.
+	blank := newTestTable(rows...)
+	press(t, &blank, "/", "space")
+	if !blank.InputFocused() || blank.Filter() != " " {
+		t.Fatalf("setup: focused=%v filter=%q, want the input focused with %q", blank.InputFocused(), blank.Filter(), " ")
+	}
+	if got, want := get(&blank), (pos{1, 12, 12, false}); got != want {
+		t.Errorf("blank filter while typing: Position() = %+v, want %+v", got, want)
+	}
+	// A filter still being typed counts as applied.
+	press(t, &blank, "w", "e", "b")
+	if got, want := get(&blank), (pos{1, 5, 12, true}); got != want {
+		t.Errorf("filter while typing: Position() = %+v, want %+v", got, want)
+	}
+
+	press(t, &unfiltered, "j")
+	if got, want := get(&unfiltered), (pos{4, 12, 12, false}); got != want {
+		t.Errorf("after moving the selection: Position() = %+v, want %+v", got, want)
+	}
+	press(t, &unfiltered, "G")
+	if got, want := get(&unfiltered), (pos{12, 12, 12, false}); got != want {
+		t.Errorf("after G: Position() = %+v, want %+v", got, want)
+	}
+}

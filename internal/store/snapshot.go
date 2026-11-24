@@ -58,6 +58,15 @@ func (s Snapshot) Images() []image.Summary { return slices.Clone(s.images) }
 // Volumes returns every volume, in engine order.
 func (s Snapshot) Volumes() []volume.Volume { return slices.Clone(s.volumes) }
 
+// NumContainers returns len(Containers()) without copying.
+func (s Snapshot) NumContainers() int { return len(s.containers) }
+
+// NumImages returns len(Images()) without copying.
+func (s Snapshot) NumImages() int { return len(s.images) }
+
+// NumVolumes returns len(Volumes()) without copying.
+func (s Snapshot) NumVolumes() int { return len(s.volumes) }
+
 // ImageUsers returns the containers, running or stopped, created from the
 // image with the given ID (for example "sha256:..."), sorted by name. All
 // tags of an image share its ID, so they share its users.
