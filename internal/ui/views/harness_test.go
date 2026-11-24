@@ -42,6 +42,7 @@ type env struct {
 	// Recorded by the containers views the model creates.
 	containers []*containersView
 	images     []*imagesView
+	volumes    []*volumesView
 	logs       []*logsView
 
 	execMu sync.Mutex
@@ -91,6 +92,11 @@ func newEnv(t *testing.T, f *dockerfake.Service, width, height int) *env {
 		{Name: "images", Aliases: []string{"im"}, New: func(snap store.Snapshot) ui.View {
 			v := newImagesView(e.st, snap, imagesConfig{now: func() time.Time { return testNow }})
 			e.images = append(e.images, v)
+			return v
+		}},
+		{Name: "volumes", Aliases: []string{"vol"}, New: func(snap store.Snapshot) ui.View {
+			v := newVolumesView(e.st, snap)
+			e.volumes = append(e.volumes, v)
 			return v
 		}},
 	}, "containers")

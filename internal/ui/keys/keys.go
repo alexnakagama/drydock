@@ -177,3 +177,26 @@ var Images = ImagesMap{
 func (m ImagesMap) Bindings() []key.Binding {
 	return []key.Binding{m.Containers, m.Delete, m.Inspect, m.Pull, m.Prune, m.ToggleAll}
 }
+
+// VolumesMap holds the volumes view's action keys.
+type VolumesMap struct {
+	Containers key.Binding
+	Create     key.Binding
+	Delete     key.Binding
+	Inspect    key.Binding
+	Prune      key.Binding
+}
+
+// Volumes is the volumes-view keymap.
+var Volumes = VolumesMap{
+	Containers: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "containers")),
+	Create:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "create")),
+	Delete:     key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+	Inspect:    key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "inspect")),
+	Prune:      key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "prune unused")),
+}
+
+// Bindings returns the volumes-view bindings in display order.
+func (m VolumesMap) Bindings() []key.Binding {
+	return []key.Binding{m.Containers, m.Create, m.Delete, m.Inspect, m.Prune}
+}
