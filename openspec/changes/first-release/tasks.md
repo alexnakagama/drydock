@@ -2,7 +2,7 @@
 
 ## 1. Repository hygiene
 
-- [ ] 1.1 Untrack the committed binary with `git rm --cached cmd/drydock/drydock` and add `/cmd/drydock/drydock` to `.gitignore` (not a bare `drydock` pattern). Verify: `git ls-files | grep -c 'cmd/drydock/drydock$'` prints 0, `go build -o cmd/drydock/drydock ./cmd/drydock && git status --porcelain` shows nothing, and `git check-ignore cmd/drydock/main.go` reports the source file is not ignored
+- [x] 1.1 Untrack the committed binary with `git rm --cached cmd/drydock/drydock` and add `/cmd/drydock/drydock` to `.gitignore` (not a bare `drydock` pattern). Verify: `git ls-files | grep -c 'cmd/drydock/drydock$'` prints 0, `go build -o cmd/drydock/drydock ./cmd/drydock && git status --porcelain` shows nothing, and `git check-ignore cmd/drydock/main.go` reports the source file is not ignored
 
 ## 2. Linting
 

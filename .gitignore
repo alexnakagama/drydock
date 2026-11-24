@@ -1,5 +1,8 @@
 # Build output
 /drydock
+/cmd/drydock/drydock
+/drydock-*
+*.exe
 /bin/
 /dist/
 
