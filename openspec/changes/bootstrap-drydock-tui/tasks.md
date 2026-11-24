@@ -51,12 +51,12 @@
 
 ## 7. Volumes
 
-- [ ] 7.1 Implement the volumes view (NAME, DRIVER, MOUNTPOINT, IN USE, sorted by name), and verify a golden-file test including an anonymous volume
-- [ ] 7.2 Implement create (`c`) with name prompt, empty name for engine-generated, client-side existence check against the snapshot (falling back to `VolumeInspect`) that rejects an existing name before calling `VolumeCreate` (the engine treats create as idempotent), Esc cancel, and verify unit tests for each scenario
-- [ ] 7.3 Implement delete (`d`) without force, with confirm listing mounting containers, and verify unit tests for unused and in-use-refused cases
-- [ ] 7.4 Wire `i` to the inspect view for volumes, and verify the breadcrumb in a unit test
-- [ ] 7.5 Implement prune unused (`P`): preview of all unmounted volumes (named and anonymous) from the snapshot, nothing-to-prune message, per-volume `VolumeRemove` without force, aggregated "N removed, M failed" report, and verify unit tests that in-use volumes are excluded and partial failures are reported
-- [ ] 7.6 Wire Enter to push the filtered containers view for the volume, and verify a unit test for breadcrumb `drydock > volumes > <name> > containers` and Esc return
+- [x] 7.1 Implement the volumes view (NAME, DRIVER, MOUNTPOINT, IN USE, sorted by name), and verify a golden-file test including an anonymous volume
+- [x] 7.2 Implement create (`c`) with name prompt, empty name for engine-generated, client-side existence check against the snapshot (falling back to `VolumeInspect`) that rejects an existing name before calling `VolumeCreate` (the engine treats create as idempotent), Esc cancel, and verify unit tests for each scenario
+- [x] 7.3 Implement delete (`d`) without force, with confirm listing mounting containers, and verify unit tests for unused and in-use-refused cases
+- [x] 7.4 Wire `i` to the inspect view for volumes, and verify the breadcrumb in a unit test
+- [x] 7.5 Implement prune unused (`P`): preview of all unmounted volumes (named and anonymous) from the snapshot, nothing-to-prune message, per-volume `VolumeRemove` without force, aggregated "N removed, M failed" report, and verify unit tests that in-use volumes are excluded and partial failures are reported
+- [x] 7.6 Wire Enter to push the filtered containers view for the volume, and verify a unit test for breadcrumb `drydock > volumes > <name> > containers` and Esc return
 
 ## 8. Integration checks
 
