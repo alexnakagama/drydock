@@ -76,10 +76,14 @@ type entry struct {
 // header, footer, status line and overlays, and routes keys.
 type Model struct {
 	resources []Resource
-	stack     []entry
-	nextView  uint64
-	snap      store.Snapshot
-	conn      store.ConnectionMsg
+	// rootIdx is the index in resources of the stack's root view. Pushed
+	// views leave it alone, so the tab strip highlights the resource the
+	// stack started from.
+	rootIdx  int
+	stack    []entry
+	nextView uint64
+	snap     store.Snapshot
+	conn     store.ConnectionMsg
 
 	width, height int
 
@@ -116,11 +120,12 @@ func New(resources []Resource, initial string) *Model {
 		command:   components.NewInput(":", strings.Join(resourceNames(resources), " | ")),
 		after:     tea.Tick,
 	}
-	r, ok := m.lookup(initial)
+	i, ok := m.lookupIdx(initial)
 	if !ok {
 		panic(fmt.Sprintf("ui: unknown initial resource %q", initial))
 	}
-	m.stack = []entry{m.newEntry(r.New(m.snap))}
+	m.rootIdx = i
+	m.stack = []entry{m.newEntry(m.resources[i].New(m.snap))}
 	return m
 }
 
@@ -143,14 +148,14 @@ func resourceNames(rs []Resource) []string {
 	return names
 }
 
-// lookup finds the resource whose name or alias is cmd.
-func (m *Model) lookup(cmd string) (Resource, bool) {
-	for _, r := range m.resources {
+// lookupIdx returns the index of the resource whose name or alias is cmd.
+func (m *Model) lookupIdx(cmd string) (int, bool) {
+	for i, r := range m.resources {
 		if r.Name == cmd || slices.Contains(r.Aliases, cmd) {
-			return r, true
+			return i, true
 		}
 	}
-	return Resource{}, false
+	return 0, false
 }
 
 func (m *Model) newEntry(v View) entry {
@@ -331,7 +336,8 @@ func (m *Model) updateTop(msg tea.Msg) tea.Cmd {
 }
 
 // handleKey routes a key press: Ctrl+C first, then the open overlay, then
-// the top view's focused input, then the global keys, then the top view.
+// the top view's focused input, then the global keys (including the
+// resource-switching keys), then the top view.
 func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	g := keys.Global
 	if key.Matches(msg, g.ForceQuit) {
@@ -358,8 +364,42 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.pop()
 		}
 		return nil
+	case key.Matches(msg, g.NextTab):
+		return m.switchTab(m.rootIdx + 1)
+	case key.Matches(msg, g.PrevTab):
+		return m.switchTab(m.rootIdx - 1)
+	}
+	for i, b := range g.TabKeys() {
+		if key.Matches(msg, b) {
+			if i >= len(m.resources) {
+				return nil // no such resource; the key is not the view's either
+			}
+			return m.switchTab(i)
+		}
 	}
 	return m.updateTop(msg)
+}
+
+// switchTab switches to resource i, wrapped into range, unless it is the
+// active resource and its root view is the only view on the stack: then
+// the key does nothing, so a stray press keeps the view's filter, selection
+// and mode.
+func (m *Model) switchTab(i int) tea.Cmd {
+	n := len(m.resources)
+	if n == 0 {
+		return nil
+	}
+	i = ((i % n) + n) % n
+	if i == m.rootIdx && len(m.stack) == 1 {
+		return nil
+	}
+	return m.switchTo(i)
+}
+
+// switchTo replaces the stack with a new root view of resource i.
+func (m *Model) switchTo(i int) tea.Cmd {
+	m.rootIdx = i
+	return m.replace(m.resources[i].New(m.snap))
 }
 
 // handleInput routes text that is not a key press (a paste) to whatever
@@ -444,11 +484,11 @@ func (m *Model) runCommand(input string) tea.Cmd {
 	if name == "" {
 		return nil
 	}
-	r, ok := m.lookup(name)
+	i, ok := m.lookupIdx(name)
 	if !ok {
 		return m.setStatus(statusError, "unknown command: "+components.Truncate(components.Clean(strings.TrimSpace(input)), 40))
 	}
-	return m.replace(r.New(m.snap))
+	return m.switchTo(i)
 }
 
 // push adds v on top of the stack.

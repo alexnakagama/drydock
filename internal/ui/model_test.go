@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -90,6 +91,9 @@ func (v *listView) InputFocused() bool { return v.table.InputFocused() }
 func (v *listView) Back() bool         { return v.table.Back() }
 func (v *listView) Close()             { v.closed++ }
 func (v *listView) selected() string   { r, _ := v.table.Selected(); return r.Key }
+func (v *listView) Position() (selected, listed, total int, filtered bool) {
+	return v.table.Position()
+}
 func (v *listView) Indicators() []string {
 	if f := v.table.Filter(); f != "" {
 		return []string{"/" + f}
@@ -136,6 +140,22 @@ type timer struct {
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	return newHarnessAt(t, "containers")
+}
+
+// Engine totals the harness resources report once a snapshot has loaded.
+const (
+	countContainers = 12
+	countImages     = 34
+	countVolumes    = 5
+)
+
+func constCount(n int) func(store.Snapshot) int { return func(store.Snapshot) int { return n } }
+
+// newHarnessAt is newHarness starting on the resource named (or aliased)
+// initial.
+func newHarnessAt(t *testing.T, initial string) *harness {
+	t.Helper()
 	h := &harness{t: t, views: map[string][]*listView{}}
 	mk := func(name string, rows ...components.Row) func(store.Snapshot) View {
 		return func(store.Snapshot) View {
@@ -145,14 +165,14 @@ func newHarness(t *testing.T) *harness {
 		}
 	}
 	h.m = New([]Resource{
-		{Name: "containers", Aliases: []string{"co"}, New: mk("containers",
+		{Name: "containers", Aliases: []string{"co"}, Count: constCount(countContainers), New: mk("containers",
 			row("c1", "db", "postgres:16", "Up 2 hours"),
 			row("c2", "web", "nginx:1.27", "Up 5 minutes"),
 			row("c3", "worker", "alpine", "Exited (0)"),
 		)},
-		{Name: "images", Aliases: []string{"im"}, New: mk("images", row("i1", "nginx:1.27", "sha256:abc", "180MB"))},
-		{Name: "volumes", Aliases: []string{"vol"}, New: mk("volumes")},
-	}, "containers")
+		{Name: "images", Aliases: []string{"im"}, Count: constCount(countImages), New: mk("images", row("i1", "nginx:1.27", "sha256:abc", "180MB"))},
+		{Name: "volumes", Aliases: []string{"vol"}, Count: constCount(countVolumes), New: mk("volumes")},
+	}, initial)
 	h.m.after = func(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
 		h.timers = append(h.timers, timer{d: d, fn: fn})
 		return nil
@@ -388,8 +408,8 @@ func TestDrillIntoLogsAndBack(t *testing.T) {
 	if hd := h.header(); !strings.HasPrefix(hd, "drydock > containers > web > logs") {
 		t.Errorf("header %q, want drydock > containers > web > logs", hd)
 	}
-	if d.w != 100 || d.h != 30-chromeLines {
-		t.Errorf("pushed view sized %dx%d, want 100x%d", d.w, d.h, 30-chromeLines)
+	if want := 30 - baseChromeLines - 1; d.w != 100 || d.h != want {
+		t.Errorf("pushed view sized %dx%d, want 100x%d", d.w, d.h, want)
 	}
 	h.press("esc")
 	if h.top() != View(h.containers()) {
@@ -1199,5 +1219,491 @@ func TestActionResultDetail(t *testing.T) {
 	h.update(store.ActionResultMsg{Label: "prune dangling images", Detail: "reclaimed 450MB"})
 	if st := h.statusLine(); st != "✓ prune dangling images: reclaimed 450MB" {
 		t.Errorf("status %q", st)
+	}
+}
+
+// --- resource tabs: switching keys ---
+
+// rootName returns the name of the resource the stack's root view is.
+func (h *harness) rootName() string {
+	h.t.Helper()
+	return h.m.resources[h.m.rootIdx].Name
+}
+
+// onlyView fails the test unless the stack holds exactly one view, the
+// newest view of resource name, and returns it.
+func (h *harness) onlyView(name string) *listView {
+	h.t.Helper()
+	vs := h.views[name]
+	if len(vs) == 0 {
+		h.t.Fatalf("no %s view was created", name)
+	}
+	v := vs[len(vs)-1]
+	if len(h.m.stack) != 1 || h.top() != View(v) {
+		h.t.Fatalf("stack has %d views with %T on top, want only the newest %s view", len(h.m.stack), h.top(), name)
+	}
+	if got := h.rootName(); got != name {
+		h.t.Errorf("active tab %q, want %q", got, name)
+	}
+	return v
+}
+
+func TestNewWithAliasSetsActiveTab(t *testing.T) {
+	h := newHarnessAt(t, "im")
+	h.onlyView("images")
+	if hd := h.header(); !strings.HasPrefix(hd, "drydock > images") {
+		t.Errorf("header %q", hd)
+	}
+}
+
+func TestDigitSwitchesResource(t *testing.T) {
+	h := newHarness(t)
+	h.press("2")
+	h.onlyView("images")
+	if hd := h.header(); !strings.HasPrefix(hd, "drydock > images") {
+		t.Errorf("header %q, want drydock > images", hd)
+	}
+	if h.containers().closed != 1 {
+		t.Errorf("containers view closed %d times, want 1", h.containers().closed)
+	}
+	h.press("3")
+	h.onlyView("volumes")
+	h.press("1")
+	h.onlyView("containers")
+}
+
+func TestTabCyclesResources(t *testing.T) {
+	h := newHarnessAt(t, "volumes")
+	h.press("tab")
+	h.onlyView("containers")
+	h.press("tab")
+	h.onlyView("images")
+
+	h = newHarness(t)
+	h.press("shift+tab")
+	h.onlyView("volumes")
+	h.press("shift+tab")
+	h.onlyView("images")
+}
+
+func TestDigitFromDrillDownReplacesStack(t *testing.T) {
+	h := newHarness(t)
+	h.press("j", "l") // logs of web
+	d, ok := h.top().(*detailView)
+	if !ok {
+		t.Fatalf("top %T, want the detail view", h.top())
+	}
+	h.press("3")
+	h.onlyView("volumes")
+	if d.closed != 1 || h.containers().closed != 1 {
+		t.Errorf("closed: detail %d, containers %d; want 1 each", d.closed, h.containers().closed)
+	}
+
+	// The active resource's key from a drill-down gives a fresh root.
+	h = newHarness(t)
+	h.press("j", "l")
+	h.press("1")
+	if got := len(h.views["containers"]); got != 2 {
+		t.Fatalf("%d containers views created, want 2", got)
+	}
+	fresh := h.onlyView("containers")
+	if fresh.selected() != "c1" {
+		t.Errorf("fresh root selected %q, want the first row", fresh.selected())
+	}
+}
+
+func TestActiveTabKeyAtRootKeepsView(t *testing.T) {
+	h := newHarness(t)
+	h.press("/")
+	h.typeText("w")
+	h.press("enter", "j") // web, worker -> worker
+	c := h.containers()
+	h.press("1")
+	if len(h.views["containers"]) != 1 || c.closed != 0 {
+		t.Fatal("1 replaced the active root view")
+	}
+	if c.table.Filter() != "w" || c.selected() != "c3" {
+		t.Errorf("after 1: filter %q selected %q, want w and c3", c.table.Filter(), c.selected())
+	}
+	// Tab wrapping onto the active resource (a single resource) is a no-op too.
+	only := New([]Resource{{Name: "containers", New: func(store.Snapshot) View { return newListView("containers") }}}, "containers")
+	v := only.top()
+	only.Update(uitest.KeyPress("tab"))
+	only.Update(uitest.KeyPress("shift+tab"))
+	if only.top() != v {
+		t.Error("tab with a single resource replaced the root view")
+	}
+}
+
+func TestCommandOnActiveRootStillReplaces(t *testing.T) {
+	h := newHarness(t)
+	h.press("/")
+	h.typeText("w")
+	h.press("enter")
+	h.press(":")
+	h.typeText("containers")
+	h.press("enter")
+	if got := len(h.views["containers"]); got != 2 {
+		t.Fatalf("%d containers views created, want 2", got)
+	}
+	if v := h.onlyView("containers"); v.table.Filter() != "" {
+		t.Errorf("new root has filter %q", v.table.Filter())
+	}
+}
+
+func TestCommandSetsActiveTab(t *testing.T) {
+	h := newHarness(t)
+	h.press(":")
+	h.typeText("vol")
+	h.press("enter")
+	h.onlyView("volumes")
+	h.press("1")
+	h.onlyView("containers")
+}
+
+func TestSwitchKeysTypedIntoFilter(t *testing.T) {
+	h := newHarnessAt(t, "images")
+	img := h.onlyView("images")
+	h.press("/")
+	h.press("2", "tab", "1")
+	if f := img.table.Filter(); f != "21" {
+		t.Errorf("filter %q, want 21", f)
+	}
+	h.onlyView("images")
+}
+
+func TestSwitchKeysIgnoredInOverlays(t *testing.T) {
+	t.Run("help", func(t *testing.T) {
+		h := newHarness(t)
+		h.press("?", "2", "tab", "shift+tab", "3")
+		if h.m.overlay != overlayHelp {
+			t.Error("help closed")
+		}
+		h.onlyView("containers")
+	})
+	t.Run("prompt", func(t *testing.T) {
+		h := newHarness(t)
+		var got string
+		h.send(Prompt("Name", "", func(s string) tea.Cmd { got = s; return nil }))
+		h.press("2", "3", "enter")
+		if got != "23" {
+			t.Errorf("prompt submitted %q, want 23", got)
+		}
+		h.onlyView("containers")
+	})
+	t.Run("confirm", func(t *testing.T) {
+		h := newHarness(t)
+		h.press("d", "2") // any key but y cancels; it must not switch
+		h.onlyView("containers")
+	})
+	t.Run("command bar", func(t *testing.T) {
+		h := newHarness(t)
+		h.press(":", "2", "esc")
+		h.onlyView("containers")
+	})
+}
+
+// --- resource tabs: rendering ---
+
+var _ Positioner = (*listView)(nil)
+
+// tabsLine returns the styled tab strip line (the second screen line).
+func (h *harness) tabsLine() string {
+	h.t.Helper()
+	lines := strings.Split(h.m.render(), "\n")
+	if len(lines) < 2 {
+		h.t.Fatalf("screen has %d lines", len(lines))
+	}
+	return lines[1]
+}
+
+// loaded delivers a loaded snapshot, so the tabs show counts.
+func (h *harness) loaded() {
+	h.t.Helper()
+	h.update(store.SnapshotMsg{Snapshot: loadSnapshot(h.t)})
+}
+
+func TestTabsShowCounts(t *testing.T) {
+	st := components.Styles
+	h := newHarness(t)
+	before := ansi.Strip(h.tabsLine())
+	if !strings.HasPrefix(before, " 1 containers  2 images  3 volumes ") {
+		t.Errorf("tabs before the first load %q, want no counts", before)
+	}
+	h.loaded()
+	line := h.tabsLine()
+	for _, want := range []string{
+		st.TabActive.Render("1 containers 12"),
+		st.Tab.Render("2 images 34"),
+		st.Tab.Render("3 volumes 5"),
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("tabs %q lack %q", line, want)
+		}
+	}
+	h.press("2")
+	line = h.tabsLine()
+	if !strings.Contains(line, st.Tab.Render("1 containers 12")) || !strings.Contains(line, st.TabActive.Render("2 images 34")) {
+		t.Errorf("after 2 the images tab is not the highlighted one: %q", line)
+	}
+}
+
+func TestTabsCountIgnoresViewRows(t *testing.T) {
+	// The count is the resource's engine total, whatever the view lists:
+	// here the containers view lists 3 rows of the 12 the engine reports.
+	h := newHarness(t)
+	h.loaded()
+	plain := ansi.Strip(h.tabsLine())
+	if !strings.Contains(plain, "1 containers 12") || !strings.HasSuffix(plain, " 1/3 ") {
+		t.Errorf("tabs %q, want containers 12 and position 1/3", plain)
+	}
+}
+
+func TestTabsHighlightFollowsRootOfDrillDown(t *testing.T) {
+	st := components.Styles
+	h := newHarnessAt(t, "images")
+	h.loaded()
+	h.send(Push(newListView("containers", row("c2", "web", "nginx:1.27", "Up"))))
+	if len(h.m.stack) != 2 {
+		t.Fatalf("stack has %d views, want 2", len(h.m.stack))
+	}
+	line := h.tabsLine()
+	if !strings.Contains(line, st.TabActive.Render("2 images 34")) || !strings.Contains(line, st.Tab.Render("1 containers 12")) {
+		t.Errorf("tabs %q, want images highlighted after the drill-down", line)
+	}
+	// The detail view on top reports no position.
+	h.press("l")
+	if plain := strings.TrimRight(ansi.Strip(h.tabsLine()), " "); strings.Contains(plain, "/") {
+		t.Errorf("tabs %q show a position for a view without one", plain)
+	}
+}
+
+func TestTabsNarrowUseAliases(t *testing.T) {
+	st := components.Styles
+	h := newHarness(t)
+	h.loaded()
+	// Full labels plus the position need 1+41+1+3+1 = 47 cells.
+	h.update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	line := h.tabsLine()
+	for _, want := range []string{st.TabActive.Render("1 co 12"), st.Tab.Render("2 im 34"), st.Tab.Render("3 vol 5")} {
+		if !strings.Contains(line, want) {
+			t.Errorf("narrow tabs %q lack %q", ansi.Strip(line), ansi.Strip(want))
+		}
+	}
+	if w := ansi.StringWidth(line); w != 40 {
+		t.Errorf("tabs line is %d cells, want 40", w)
+	}
+
+	// A resource without an alias keeps its name.
+	m := New([]Resource{
+		{Name: "containers", Aliases: []string{"co"}, New: func(store.Snapshot) View { return newListView("containers") }},
+		{Name: "networks", New: func(store.Snapshot) View { return newListView("networks") }},
+	}, "containers")
+	m.Update(tea.WindowSizeMsg{Width: 22, Height: 10})
+	if got := ansi.Strip(strings.Split(m.render(), "\n")[1]); !strings.HasPrefix(got, " 1 co  2 networks") {
+		t.Errorf("tabs %q, want the alias and the bare name", got)
+	}
+}
+
+func TestTabsPositionWinsWhenNarrow(t *testing.T) {
+	st := components.Styles
+	h := newHarness(t)
+	h.loaded()
+	h.press("/")
+	h.typeText("w")
+	h.press("enter") // 1/2 of 3
+	for _, w := range []int{30, 16, 12, 11} {
+		h.update(tea.WindowSizeMsg{Width: w, Height: 10})
+		line := h.tabsLine()
+		if !strings.HasSuffix(line, st.Position.Render("1/2 of 3")+" ") {
+			t.Errorf("width %d: tabs %q do not end with the full position", w, ansi.Strip(line))
+		}
+		if got := ansi.StringWidth(line); got != w {
+			t.Errorf("width %d: tabs line is %d cells", w, got)
+		}
+	}
+}
+
+func TestPositionText(t *testing.T) {
+	for _, tc := range []struct {
+		sel, listed, total int
+		filtered           bool
+		want               string
+	}{
+		{3, 12, 12, false, "3/12"},
+		{1, 5, 12, true, "1/5 of 12"},
+		{0, 0, 12, true, "0/0 of 12"},
+		{1, 12, 12, true, "1/12 of 12"},
+		{0, 0, 0, false, "0/0"},
+	} {
+		if got := formatPosition(tc.sel, tc.listed, tc.total, tc.filtered); got != tc.want {
+			t.Errorf("formatPosition(%d, %d, %d, %v) = %q, want %q", tc.sel, tc.listed, tc.total, tc.filtered, got, tc.want)
+		}
+	}
+
+	h := newHarness(t)
+	pos := func() string {
+		f := strings.Fields(ansi.Strip(h.tabsLine()))
+		if i := slices.Index(f, "of"); i > 0 {
+			return strings.Join(f[i-1:], " ")
+		}
+		return f[len(f)-1]
+	}
+	if got := pos(); got != "1/3" {
+		t.Errorf("position %q, want 1/3", got)
+	}
+	h.press("j")
+	if got := pos(); got != "2/3" {
+		t.Errorf("after j position %q, want 2/3", got)
+	}
+	h.press("/")
+	h.typeText("zzz")
+	if got := pos(); got != "0/0 of 3" {
+		t.Errorf("filter matching nothing: position %q, want 0/0 of 3", got)
+	}
+	h.press("esc")
+	h.press("3") // the volumes view lists nothing
+	if got := pos(); got != "0/0" {
+		t.Errorf("empty volumes: position %q, want 0/0", got)
+	}
+}
+
+func TestShortTerminalHasNoTabs(t *testing.T) {
+	h := newHarness(t)
+	h.loaded()
+	h.update(tea.WindowSizeMsg{Width: 80, Height: 4})
+	lines := strings.Split(h.screen(), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("screen has %d lines, want 4:\n%s", len(lines), h.screen())
+	}
+	if !strings.HasPrefix(strings.TrimSpace(lines[0]), "drydock > containers") {
+		t.Errorf("first line %q, want the header", lines[0])
+	}
+	if strings.Contains(h.screen(), "1 containers") {
+		t.Errorf("tab strip shown at height 4:\n%s", h.screen())
+	}
+	if !strings.HasPrefix(strings.TrimSpace(lines[1]), "NAME") {
+		t.Errorf("content line %q, want the table header", lines[1])
+	}
+	if !strings.Contains(lines[3], "l logs") {
+		t.Errorf("footer %q, want the key hints", lines[3])
+	}
+	if c := h.containers(); c.table.Len() != 3 {
+		t.Fatalf("setup: %d rows", c.table.Len())
+	}
+	if _, ch := h.m.contentSize(); ch != 1 {
+		t.Errorf("content height %d at height 4, want 1", ch)
+	}
+	// An error still reaches the status line.
+	h.send(Error("boom"))
+	if got := strings.TrimSpace(strings.Split(h.screen(), "\n")[2]); got != "✗ boom" {
+		t.Errorf("status line %q, want the error", got)
+	}
+
+	h.update(tea.WindowSizeMsg{Width: 80, Height: 5})
+	lines = strings.Split(h.screen(), "\n")
+	if len(lines) != 5 || !strings.Contains(lines[1], "1 containers 12") {
+		t.Errorf("at height 5 the tab strip is missing:\n%s", h.screen())
+	}
+	if _, ch := h.m.contentSize(); ch != 1 {
+		t.Errorf("content height %d at height 5, want 1", ch)
+	}
+}
+
+// --- footer and help overlay ---
+
+func TestFooterFitsWholeHints(t *testing.T) {
+	h := newHarness(t)
+	footer := func() string {
+		lines := strings.Split(h.screen(), "\n")
+		return strings.TrimRight(lines[len(lines)-1], " ")
+	}
+	const all = " l logs  d delete  / filter  : command  ? help  q quit"
+	if got := footer(); got != all {
+		t.Errorf("wide footer %q, want %q", got, all)
+	}
+	for _, tc := range []struct {
+		width int
+		want  string
+	}{
+		{len(all), all},
+		{len(all) - 1, " l logs  d delete  / filter  ? more"},
+		{len(" l logs  d delete  / filter  ? more"), " l logs  d delete  / filter  ? more"},
+		{len(" l logs  d delete  ? more"), " l logs  d delete  ? more"},
+		{len(" l logs  d delete  / filter  ? more") - 1, " l logs  d delete  ? more"},
+		{len(" ? more"), " ? more"},
+	} {
+		h.update(tea.WindowSizeMsg{Width: tc.width, Height: 10})
+		if got := footer(); got != tc.want {
+			t.Errorf("width %d: footer %q, want %q", tc.width, got, tc.want)
+		}
+	}
+}
+
+func TestFitHintsSkipsDisabled(t *testing.T) {
+	off := key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "shell"))
+	off.SetEnabled(false)
+	got := ansi.Strip(fitHints(hints([]key.Binding{keyLogs, off, keyDelete}), 200))
+	if want := "l logs  d delete  : command  ? help  q quit"; got != want {
+		t.Errorf("fitHints = %q, want %q", got, want)
+	}
+}
+
+// shellView is a list view whose `x shell` key applies only to rows whose
+// status starts with "Up".
+type shellView struct{ *listView }
+
+var keyShell = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "shell"))
+
+func (v shellView) KeyHelp() []key.Binding {
+	shell := keyShell
+	if r, ok := v.table.Selected(); !ok || !strings.HasPrefix(r.Cells[2], "Up") {
+		shell.SetEnabled(false)
+	}
+	return []key.Binding{keyLogs, shell}
+}
+
+func TestHelpDimsDisabledKeys(t *testing.T) {
+	st := components.Styles
+	m := New([]Resource{{Name: "containers", New: func(store.Snapshot) View {
+		return shellView{newListView("containers",
+			row("c1", "web", "nginx", "Up 5 minutes"),
+			row("c3", "worker", "alpine", "Exited (0)"))}
+	}}}, "containers")
+	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m.Update(uitest.KeyPress("j")) // worker: shell does not apply
+	m.Update(uitest.KeyPress("?"))
+	help := m.helpView()
+	dimmed := st.FooterDesc.Render(components.Fit("x", helpKeyWidth)) + " " + st.FooterDesc.Render("shell")
+	if !strings.Contains(help, dimmed) {
+		t.Errorf("help does not list x shell dimmed:\n%q", help)
+	}
+	if enabled := st.HelpKey.Render(components.Fit("l", helpKeyWidth)) + " logs"; !strings.Contains(help, enabled) {
+		t.Errorf("help does not list l logs as enabled:\n%q", help)
+	}
+	if strings.Contains(m.footerView(), "shell") {
+		t.Error("footer shows the disabled x shell")
+	}
+	m.Update(uitest.KeyPress("esc"))
+	m.Update(uitest.KeyPress("k")) // web: shell applies
+	if !strings.Contains(m.helpView(), st.HelpKey.Render(components.Fit("x", helpKeyWidth))+" shell") {
+		t.Error("help does not list x shell as enabled on a running row")
+	}
+}
+
+func TestHelpListsSwitchKeysOnce(t *testing.T) {
+	h := newHarness(t)
+	h.press("?")
+	s := h.screen()
+	if !strings.Contains(s, "1-3/tab    switch resource") {
+		t.Errorf("help lacks the full switch entry:\n%s", s)
+	}
+	for _, k := range []string{"shift+tab", "tab "} {
+		if strings.Contains(s, k) && !strings.Contains(s, "1-3/"+k) {
+			t.Errorf("help lists %q on its own:\n%s", k, s)
+		}
+	}
+	if !strings.Contains(s, "? or esc to close") {
+		t.Errorf("help lacks the close hint:\n%s", s)
 	}
 }

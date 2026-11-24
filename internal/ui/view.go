@@ -81,6 +81,10 @@ type Resource struct {
 	// New creates the view, seeded with the latest snapshot (which is the
 	// zero Snapshot until the store's first load arrives).
 	New func(snap store.Snapshot) View
+	// Count returns how many of the resource the engine has, for the tab
+	// strip. It is called on every render, so it must be cheap and must not
+	// block. Nil leaves the count out.
+	Count func(snap store.Snapshot) int
 }
 
 // Messages views use to drive the root model. They are produced by the

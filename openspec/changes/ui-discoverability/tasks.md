@@ -37,8 +37,8 @@
 
 ## 3. Root model: tab strip, tab keys, footer, help, position
 
-- [ ] 3.1 Add `Count func(store.Snapshot) int` to `ui.Resource`, and set it in `views/resources.go` using the 1.4 helpers. Verify with `go build ./...`.
-- [ ] 3.2 Add the matching-only bindings `Tab1/Tab2/Tab3/NextTab/PrevTab` and the display-only `SwitchHelp` (`1-3/tab`, `switch resource`) to `keys.Global`, with only `SwitchHelp` in `Bindings()` (D3). Refactor `lookup` into `lookupIdx`. Add `rootIdx`, set in `New`, and a `switchTo(i)` helper that `runCommand` and the new keys share; the tab keys are a no-op on the active root (D2). Verify with `model_test.go` cases:
+- [x] 3.1 Add `Count func(store.Snapshot) int` to `ui.Resource`, and set it in `views/resources.go` using the 1.4 helpers. Verify with `go build ./...`.
+- [x] 3.2 Add the matching-only bindings `Tab1/Tab2/Tab3/NextTab/PrevTab` and the display-only `SwitchHelp` (`1-3/tab`, `switch resource`) to `keys.Global`, with only `SwitchHelp` in `Bindings()` (D3). Refactor `lookup` into `lookupIdx`. Add `rootIdx`, set in `New`, and a `switchTo(i)` helper that `runCommand` and the new keys share; the tab keys are a no-op on the active root (D2). Verify with `model_test.go` cases:
   - `New` with the alias `im` initial sets the images tab active
   - `2` switches to images
   - `Tab` from volumes wraps to containers
@@ -49,7 +49,7 @@
   - `/` followed by `2` types into the filter
   - the switching keys are ignored while the help overlay or a prompt is open
   - in the logs view, typing `3` during a search goes into the search text
-- [ ] 3.3 Render `tabsView()` below the header when `m.height >= 5`, with `contentSize()` following the same `showTabs()` rule (D1). The strip shows numbered tabs with counts (omitted before the first load), highlights `rootIdx`, and falls back to the first alias or the name. The `Positioner` text is right-aligned, takes priority, and reads `3/12`, `1/5 of 12` or `0/0` (D4). Verify with `model_test.go` render assertions that compare against the `Styles.*.Render` output:
+- [x] 3.3 Render `tabsView()` below the header when `m.height >= 5`, with `contentSize()` following the same `showTabs()` rule (D1). The strip shows numbered tabs with counts (omitted before the first load), highlights `rootIdx`, and falls back to the first alias or the name. The `Positioner` text is right-aligned, takes priority, and reads `3/12`, `1/5 of 12` or `0/0` (D4). Verify with `model_test.go` render assertions that compare against the `Styles.*.Render` output:
   - counts, and the count independent of the running-only mode
   - the highlight after a drill-down
   - the narrow alias fallback
@@ -58,11 +58,11 @@
   - at height 4, no strip, with header, status and footer all present
   
   Update existing tests that assumed 3 chrome lines.
-- [ ] 3.4 Rewrite `footerView` to fit whole hint segments: show everything when it fits; otherwise show only view hints followed by `? more`, without the `:`, `?` or `q` hints (D7). Verify with `model_test.go` cases:
+- [x] 3.4 Rewrite `footerView` to fit whole hint segments: show everything when it fits; otherwise show only view hints followed by `? more`, without the `:`, `?` or `q` hints (D7). Verify with `model_test.go` cases:
   - a wide containers view shows every hint plus `: command  ? help  q quit`
   - a 60-column containers view ends with `? more`, has no `q quit`, and no `…`
   - a 60-column logs view ends with `? more`
-- [ ] 3.5 In the help overlay, render disabled bindings dimmed, widen the key column to 10, and drop the blank line before the close hint (D8). Verify with `model_test.go` cases:
+- [x] 3.5 In the help overlay, render disabled bindings dimmed, widen the key column to 10, and drop the blank line before the close hint (D8). Verify with `model_test.go` cases:
   - with a stopped container selected, `?` lists `x` rendered with the muted style
   - `1-3/tab` appears in full
   - at 80x24 in the containers view, the overlay's bottom border and `? or esc to close` are both visible

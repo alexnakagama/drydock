@@ -350,6 +350,21 @@ func TestLogsSearchTypesGlobalKeys(t *testing.T) {
 	}
 }
 
+func TestLogsSearchTypesSwitchKeys(t *testing.T) {
+	e, _, _ := logEnv(t, 3, nil)
+	e.openLogs()
+	e.press("/")
+	e.typeText("3")
+	e.press("tab")
+	e.typeText("1")
+	if !e.logs[0].searching || e.logs[0].search != "31" {
+		t.Errorf("search = %q (focused %v), want 31", e.logs[0].search, e.logs[0].searching)
+	}
+	if h := e.header(); !strings.Contains(h, "web > logs") {
+		t.Errorf("header = %q, want the logs view still open", h)
+	}
+}
+
 func TestLogsPopCancelsStream(t *testing.T) {
 	e, f, _ := logEnv(t, 5, nil)
 	lv := e.openLogs()

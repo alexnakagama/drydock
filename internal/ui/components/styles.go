@@ -25,6 +25,11 @@ type StyleSet struct {
 	FooterKey    lipgloss.Style
 	FooterDesc   lipgloss.Style
 
+	// Resource tab strip and list position.
+	TabActive lipgloss.Style
+	Tab       lipgloss.Style
+	Position  lipgloss.Style
+
 	// Status line.
 	StatusSuccess  lipgloss.Style
 	StatusError    lipgloss.Style
@@ -58,6 +63,10 @@ var Styles = StyleSet{
 	Disconnected: lipgloss.NewStyle().Bold(true).Foreground(colorError),
 	FooterKey:    lipgloss.NewStyle().Bold(true).Foreground(colorAccent),
 	FooterDesc:   lipgloss.NewStyle().Foreground(colorMuted),
+
+	TabActive: lipgloss.NewStyle().Bold(true).Foreground(colorAccent),
+	Tab:       lipgloss.NewStyle().Foreground(colorMuted),
+	Position:  lipgloss.NewStyle().Foreground(colorMuted),
 
 	StatusSuccess:  lipgloss.NewStyle().Foreground(colorSuccess),
 	StatusError:    lipgloss.NewStyle().Foreground(colorError),

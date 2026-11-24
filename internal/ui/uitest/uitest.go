@@ -3,6 +3,7 @@
 package uitest
 
 import (
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -28,9 +29,14 @@ var specialKeys = map[string]rune{
 }
 
 // KeyPress returns the key press message for a key name such as "q", "G",
-// "?", "enter", "esc", "up" or "ctrl+c". It panics on a name it does not
-// know, which is a mistake in the test.
+// "?", "enter", "esc", "up", "shift+tab" or "ctrl+c". It panics on a name
+// it does not know, which is a mistake in the test.
 func KeyPress(name string) tea.KeyPressMsg {
+	if rest, ok := strings.CutPrefix(name, "shift+"); ok {
+		if code, ok := specialKeys[rest]; ok && code != tea.KeySpace {
+			return tea.KeyPressMsg{Code: code, Mod: tea.ModShift}
+		}
+	}
 	if code, ok := specialKeys[name]; ok {
 		k := tea.KeyPressMsg{Code: code}
 		if code == tea.KeySpace {
