@@ -62,6 +62,16 @@ type View interface {
 	Close()
 }
 
+// Positioner is implemented by list views that can report where their
+// selection is. The root detects it with a type assertion and shows the
+// position next to the resource tabs.
+type Positioner interface {
+	// Position returns the 1-based index of the selected row among the
+	// listed rows (0 when none is listed), the number of rows listed, the
+	// number of rows before filtering, and whether a filter is applied.
+	Position() (selected, listed, total int, filtered bool)
+}
+
 // Resource is a root view the command bar can switch to.
 type Resource struct {
 	// Name is the command, for example "containers".

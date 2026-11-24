@@ -38,6 +38,8 @@ var containerColumns = []components.Column{
 	{Title: "PORTS", Width: 24, Flex: true},
 }
 
+var _ ui.Positioner = (*containersView)(nil)
+
 // containersView lists containers and acts on the selected one.
 //
 // The root containers view lists every container, running-only by default.
@@ -123,8 +125,36 @@ func (v *containersView) Indicators() []string {
 	return ind
 }
 
+// KeyHelp returns the view's bindings in priority order, as copies:
+// actions that do not apply to the selected container (or that need a
+// selection when there is none) are disabled, and `s` is labelled with what
+// it would do. Key presses are still matched against keys.Containers, so a
+// disabled hint never disables its key.
 func (v *containersView) KeyHelp() []key.Binding {
-	return append(keys.Containers.Bindings(), keys.Table.Filter)
+	km := keys.Containers
+	logs, startStop, shell, inspect, restart, del := km.Logs, km.StartStop, km.Shell, km.Inspect, km.Restart, km.Delete
+	c, ok := v.selected()
+	if !ok {
+		disable(&logs, &startStop, &shell, &inspect, &restart, &del)
+	} else {
+		switch c.State {
+		case container.StateRunning:
+			startStop.SetHelp(km.StartStop.Help().Key, "stop")
+		case container.StateCreated, container.StateExited:
+			startStop.SetHelp(km.StartStop.Help().Key, "start")
+		default:
+			disable(&startStop)
+		}
+		if c.State != container.StateRunning {
+			disable(&shell)
+		}
+	}
+	return []key.Binding{logs, startStop, shell, inspect, restart, del, km.ToggleAll, keys.Table.Filter}
+}
+
+// Position reports the table's selection and row counts (ui.Positioner).
+func (v *containersView) Position() (selected, listed, total int, filtered bool) {
+	return v.table.Position()
 }
 
 func (v *containersView) InputFocused() bool { return v.table.InputFocused() }
@@ -227,7 +257,7 @@ func (v *containersView) refresh() {
 	rows := make([]components.Row, len(list))
 	for i, c := range list {
 		v.shown[c.ID] = c
-		rows[i] = components.Row{Key: c.ID, Cells: []string{
+		rows[i] = components.Row{Key: c.ID, Tone: containerTone(c.State), Cells: []string{
 			store.ContainerName(c),
 			displayImage(c.Image),
 			displayStatus(c),
@@ -246,6 +276,30 @@ func (v *containersView) refresh() {
 		v.table.SetEmptyText(v.emptyText)
 	}
 	v.table.SetRows(rows)
+}
+
+// containerTone colors a container row by its state: running is good,
+// paused and restarting need attention, and exited, created and dead are
+// dimmed. Any other state (for example removing) keeps the default color.
+func containerTone(s container.ContainerState) components.Tone {
+	switch s {
+	case container.StateRunning:
+		return components.ToneGood
+	case container.StatePaused, container.StateRestarting:
+		return components.ToneWarn
+	case container.StateExited, container.StateCreated, container.StateDead:
+		return components.ToneDim
+	default:
+		return components.ToneDefault
+	}
+}
+
+// disable disables the given binding copies. They must be copies: the
+// package-level keymaps are what key presses are matched against.
+func disable(bs ...*key.Binding) {
+	for _, b := range bs {
+		b.SetEnabled(false)
+	}
 }
 
 // isActive reports whether a container is running in the broad sense the

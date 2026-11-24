@@ -5,4 +5,4 @@ NAME                    IMAGE                      STATUS                  PORTS
                                                                                                     
                                                                                                     
                                                                                                     
- s start/stop  r restart  d delete  l logs  i inspect  x shell  a all/running  / filter  : command …
+ a all/running  / filter  : command  ? help  q quit                                                 

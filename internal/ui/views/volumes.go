@@ -38,6 +38,8 @@ var volumeColumns = []components.Column{
 	{Title: "IN USE", Width: 6},
 }
 
+var _ ui.Positioner = (*volumesView)(nil)
+
 // volumesView lists volumes and acts on the selected one.
 type volumesView struct {
 	st   *store.Store
@@ -78,8 +80,26 @@ func (v *volumesView) Indicators() []string {
 	return nil
 }
 
+// KeyHelp returns the view's bindings in priority order, as copies: the
+// row actions are disabled when no row is selected, and `enter` when no
+// container uses the selected volume. Key presses are still matched against
+// keys.Volumes, so a disabled hint never disables its key.
 func (v *volumesView) KeyHelp() []key.Binding {
-	return append(keys.Volumes.Bindings(), keys.Table.Filter)
+	km := keys.Volumes
+	ctrs, inspect, del := km.Containers, km.Inspect, km.Delete
+	vol, ok := v.selected()
+	switch {
+	case !ok:
+		disable(&ctrs, &inspect, &del)
+	case v.snap.VolumeUseCount(vol.Name) == 0:
+		disable(&ctrs)
+	}
+	return []key.Binding{ctrs, inspect, km.Create, del, keys.Table.Filter, km.Prune}
+}
+
+// Position reports the table's selection and row counts (ui.Positioner).
+func (v *volumesView) Position() (selected, listed, total int, filtered bool) {
+	return v.table.Position()
 }
 
 func (v *volumesView) InputFocused() bool { return v.table.InputFocused() }
@@ -159,11 +179,16 @@ func (v *volumesView) refresh() {
 			continue
 		}
 		v.shown[vol.Name] = vol
-		rows = append(rows, components.Row{Key: vol.Name, Cells: []string{
+		users := v.snap.VolumeUseCount(vol.Name)
+		tone := components.ToneDefault
+		if users == 0 {
+			tone = components.ToneDim
+		}
+		rows = append(rows, components.Row{Key: vol.Name, Tone: tone, Cells: []string{
 			vol.Name,
 			vol.Driver,
 			vol.Mountpoint,
-			fmt.Sprint(v.snap.VolumeUseCount(vol.Name)),
+			fmt.Sprint(users),
 		}})
 	}
 	if v.snap.Loaded() {
