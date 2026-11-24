@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  # Reused by release.yml so a tag only publishes if these checks pass.
+  workflow_call:
+
+# Least privilege by default; no job here needs to write.
+permissions:
+  contents: read
+
+# One run per workflow and ref. Superseded PR runs are cancelled; runs on
+# master (and release tags, via workflow_call) always finish. The "ci-"
+# prefix keeps this group distinct from any group the calling workflow uses,
+# since github.workflow is the caller's name under workflow_call.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GOLANGCI_LINT_VERSION: v2.15.0
+  GORELEASER_VERSION: v2.20.3
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go vet (integration)
+        run: go vet -tags integration ./...
+
+      # goinstall builds the linter with the Go toolchain from go.mod, so it
+      # can never be older than the language version it analyses.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          install-mode: goinstall
+
+      # The action above already put the pinned binary on PATH; a plain run
+      # avoids a second build and a second cache save.
+      - name: golangci-lint (integration)
+        run: golangci-lint run --build-tags integration ./...
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: go test -race
+        run: go test -race ./...
+
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Docker engine info
+        run: docker version
+
+      # Pulled up front so a registry outage or rate limit shows up as a
+      # pull failure, not as a test failure.
+      - name: Pull test images
+        timeout-minutes: 5
+        run: |
+          for image in alpine:latest debian:stable-slim; do
+            for attempt in 1 2 3; do
+              docker pull "$image" && break
+              if [ "$attempt" -eq 3 ]; then
+                echo "::error::failed to pull $image"
+                exit 1
+              fi
+              sleep $((attempt * 10))
+            done
+          done
+
+      - name: go test (integration)
+        timeout-minutes: 10
+        run: go test -count=1 -tags integration ./...
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: goreleaser check
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: check
+
+      - name: goreleaser build (snapshot)
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: ${{ env.GORELEASER_VERSION }}
+          args: build --snapshot --clean
+
+      # Guards against a silent change to the release matrix: exactly one
+      # binary per expected target and nothing else.
+      - name: Check release targets
+        run: |
+          find dist -type f -name drydock
+          count="$(find dist -type f -name drydock | wc -l)"
+          if [ "$count" -ne 4 ]; then
+            echo "::error::expected 4 binaries, got $count"
+            exit 1
+          fi
+          for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+            if [ "$(find dist -type f -path "*_${target}*/drydock" | wc -l)" -ne 1 ]; then
+              echo "::error::missing or duplicate binary for $target"
+              exit 1
+            fi
+          done

@@ -77,7 +77,7 @@ See proposal.md for motivation. Relevant current state, verified locally on 2026
 
 ### 6. Action versions
 
-Actions are referenced by major version tag (`actions/checkout@v5`, `actions/setup-go@v6`, `golangci/golangci-lint-action@v8`, `goreleaser/goreleaser-action@v6`), and the GoReleaser and golangci-lint tool versions are pinned. Pinning by commit SHA was considered. It isn't worth it yet for a personal project with only the built-in `GITHUB_TOKEN`. Revisit if third-party secrets are added (for example a Homebrew tap token).
+Actions are referenced by major version tag (`actions/checkout@v7`, `actions/setup-go@v7`, `golangci/golangci-lint-action@v9`, `goreleaser/goreleaser-action@v7`, the current majors as of 2026-11-24), and the GoReleaser and golangci-lint tool versions are pinned. Pinning by commit SHA was considered. It isn't worth it yet for a personal project with only the built-in `GITHUB_TOKEN`. Revisit if third-party secrets are added (for example a Homebrew tap token).
 
 ## Risks / Trade-offs
 
