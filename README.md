@@ -125,16 +125,51 @@ Install into `$(go env GOPATH)/bin`:
 go install ./cmd/drydock
 ```
 
-Global keys and list navigation (`?` shows every key of the current view):
+## Using drydock
 
-| Key      | Action                                                        |
-|----------|---------------------------------------------------------------|
-| `:`      | Command bar: `containers`, `images`, `volumes` (`co`, `im`, `vol`) |
-| `/`      | Filter the list (case-insensitive); Esc clears it             |
-| `j`/`k`, arrows | Move the selection; `g`/`G` jump to the first/last row |
-| `Esc`    | Clear the filter, otherwise go back to the previous view      |
-| `?`      | Help                                                          |
-| `q`      | Quit (Ctrl+C quits from anywhere, even inside a text input)   |
+On terminals at least 5 lines tall, a tab strip below the header lists the
+resources with their counts, for example
+`1 containers 12  2 images 34  3 volumes 5`, and highlights the one the
+current view belongs to. Counts appear once the first snapshot has loaded.
+They are engine totals: every container whatever the `a` toggle, and every
+image object, dangling ones included. On the right of the strip, list views
+show the selected row and how many rows are listed: `3/12`, or `3/5 of 12`
+while a filter is applied. The number after `of` counts the rows of the
+current view, so with `a` off it can be lower than the tab count.
+
+Rows are colored by state. Running containers are green. Paused and
+restarting containers are orange. Exited, created and dead containers,
+dangling images and unused volumes are dimmed. The selected row is shown in
+reverse video, without its state color.
+
+The footer shows only the keys that apply to the selected row, most
+important first. For example, `x shell` appears only on a running container,
+and `s` reads `stop` on a running container, `start` on an exited or created
+one, and is hidden otherwise. When the hints do not fit the terminal width,
+the footer leaves out `: command` and `q quit`, replaces `? help` with
+`? more`, and drops view hints from the end until the rest fits. `?` always
+lists every key of the current view, with the ones that do not apply right
+now dimmed.
+
+Switching resources replaces the whole view stack, closing any drill-down
+(for example the containers using an image). `Tab`/`Shift+Tab` wrap around.
+Pressing a resource's number while already at its top level does nothing, so
+its filter and selection are kept; `:name` always reopens it fresh. The
+switching keys are ignored while typing in a filter, a prompt or the command
+bar.
+
+Global keys and list navigation:
+
+| Key               | Action                                                        |
+|-------------------|---------------------------------------------------------------|
+| `1`/`2`/`3`       | Switch to containers/images/volumes (no-op if already there)  |
+| `Tab`/`Shift+Tab` | Switch to the next/previous resource                          |
+| `:`               | Command bar: `containers`, `images`, `volumes` (`co`, `im`, `vol`) |
+| `/`               | Filter the list (case-insensitive); Esc clears it             |
+| `j`/`k`, arrows   | Move the selection; `g`/`G` jump to the first/last row        |
+| `Esc`             | Clear the filter, otherwise go back to the previous view      |
+| `?`               | Help                                                          |
+| `q`               | Quit (Ctrl+C quits from anywhere, even inside a text input)   |
 
 Actions in the resource views. Delete and prune ask for confirmation first:
 
