@@ -11,13 +11,13 @@
 
 ## 3. CI workflow
 
-- [ ] 3.1 Add `.github/workflows/ci.yml` with `push` (master), `pull_request` and `workflow_call` triggers, `contents: read` permissions and per-ref concurrency, and the `lint`, `test` (ubuntu + macOS, `-race`) and `integration` (ubuntu, pre-pulled `alpine:latest`/`debian:stable-slim`, timeout) jobs from design.md §2, all using `setup-go` with `go-version-file: go.mod`. Verify: `actionlint` (or the GitHub workflow editor) reports no errors
-- [ ] 3.2 Add the `build` job running `goreleaser check` and `goreleaser build --snapshot --clean` (needs task 4.1). Verify: the same commands succeed locally and produce 4 binaries under `dist/`
+- [x] 3.1 Add `.github/workflows/ci.yml` with `push` (master), `pull_request` and `workflow_call` triggers, `contents: read` permissions and per-ref concurrency, and the `lint`, `test` (ubuntu + macOS, `-race`) and `integration` (ubuntu, pre-pulled `alpine:latest`/`debian:stable-slim`, timeout) jobs from design.md §2, all using `setup-go` with `go-version-file: go.mod`. Verify: `actionlint` (or the GitHub workflow editor) reports no errors
+- [x] 3.2 Add the `build` job running `goreleaser check` and `goreleaser build --snapshot --clean` (needs task 4.1). Verify: the same commands succeed locally and produce 4 binaries under `dist/`
 
 ## 4. Release configuration
 
-- [ ] 4.1 Add `.goreleaser.yaml` with the builds, archives, checksum, changelog and release settings from design.md §4 (linux/darwin × amd64/arm64, `CGO_ENABLED=0`, `-trimpath`, `-s -w`, no `-X` injection). Verify: `goreleaser check` passes and `goreleaser release --snapshot --clean` produces 4 `tar.gz` archives plus `checksums.txt`, and the extracted linux/amd64 binary runs `-version` and prints a `drydock v…` line
-- [ ] 4.2 Add `.github/workflows/release.yml`, triggered on `v*` tags, that calls `ci.yml` as a reusable workflow and then runs a `release` job (`needs` CI, `contents: write`, checkout with `fetch-depth: 0`, `goreleaser-action` with a pinned version and `release --clean`, `GITHUB_TOKEN`). Verify: `actionlint` reports no errors
+- [x] 4.1 Add `.goreleaser.yaml` with the builds, archives, checksum, changelog and release settings from design.md §4 (linux/darwin × amd64/arm64, `CGO_ENABLED=0`, `-trimpath`, `-s -w`, no `-X` injection). Verify: `goreleaser check` passes and `goreleaser release --snapshot --clean` produces 4 `tar.gz` archives plus `checksums.txt`, and the extracted linux/amd64 binary runs `-version` and prints a `drydock v…` line
+- [x] 4.2 Add `.github/workflows/release.yml`, triggered on `v*` tags, that calls `ci.yml` as a reusable workflow and then runs a `release` job (`needs` CI, `contents: write`, checkout with `fetch-depth: 0`, `goreleaser-action` with a pinned version and `release --clean`, `GITHUB_TOKEN`). Verify: `actionlint` reports no errors
 
 ## 5. Documentation
 
