@@ -9,4 +9,4 @@ nginx:latest                                       aaaaaaaaaaaa  187MB      2 we
 <none>:<none>                                      eeeeeeeeeeee  150MB      5 days ago        0     
 <none>:<none>                                      ffffffffffff  90MB       7 days ago        1     
                                                                                                     
- enter containers  d delete  i inspect  p pull  P prune dangling  a all/tagged  / filter  : command…
+ i inspect  p pull  d delete  / filter  a all/tagged  P prune dangling  : command  ? help  q quit   

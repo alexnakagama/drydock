@@ -7,4 +7,4 @@ shared                              local       /var/lib/docker/volumes/shared/_
 tmp1                                local       /var/lib/docker/volumes/tmp1/_data            0     
                                                                                                     
                                                                                                     
- enter containers  c create  d delete  i inspect  P prune unused  / filter  : command  ? help  q qu…
+ i inspect  c create  d delete  / filter  P prune unused  : command  ? help  q quit                 

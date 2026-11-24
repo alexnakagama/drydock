@@ -15,12 +15,12 @@
 
 ## 2. Views: tones, position, context-aware key help
 
-- [ ] 2.1 Set row tones in `refresh()` for each view. Verify with view tests that assert each row's `Tone` field for every listed state, including `removing` giving the default tone.
+- [x] 2.1 Set row tones in `refresh()` for each view. Verify with view tests that assert each row's `Tone` field for every listed state, including `removing` giving the default tone.
   - Containers: `running` is good; `paused` and `restarting` are warn; `exited`, `created` and `dead` are dim; any other state is default.
   - Images: dangling is dim.
   - Volumes: `VolumeUseCount == 0` is dim.
-- [ ] 2.2 Add the `ui.Positioner` interface in `internal/ui/view.go`, and implement it on the three list views by delegating to the table. Verify with compile-time assertions (`var _ ui.Positioner = (*containersView)(nil)`, etc.) and `go build ./...`.
-- [ ] 2.3 Rewrite `KeyHelp()` in the containers, images and volumes views to return copies of the bindings in priority order, with inapplicable ones disabled and `s` labeled per state (D6). Verify with view tests for:
+- [x] 2.2 Add the `ui.Positioner` interface in `internal/ui/view.go`, and implement it on the three list views by delegating to the table. Verify with compile-time assertions (`var _ ui.Positioner = (*containersView)(nil)`, etc.) and `go build ./...`.
+- [x] 2.3 Rewrite `KeyHelp()` in the containers, images and volumes views to return copies of the bindings in priority order, with inapplicable ones disabled and `s` labeled per state (D6). Verify with view tests for:
   - a running container: `x` enabled, `s stop`
   - an exited container: `x` disabled, `s start`
   - a created container: `s start`
@@ -28,7 +28,7 @@
   - an unused image: `enter` disabled
   - an unused volume: `enter` disabled
   - an empty list: only the non-row actions enabled
-- [ ] 2.4 Add regression tests:
+- [x] 2.4 Add regression tests:
   - After `KeyHelp()` has been called with an exited container selected, pressing `x` still shows the "must be running" error.
   - Pressing `s` on a paused container still shows the "start/stop is unavailable" error.
   - The package-level `keys.Containers` bindings are still enabled.

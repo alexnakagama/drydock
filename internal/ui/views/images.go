@@ -34,6 +34,8 @@ const (
 	noneDigest = "<none>@<none>"
 )
 
+var _ ui.Positioner = (*imagesView)(nil)
+
 // imageColumns are the images view's columns. REPOSITORY:TAG is searched by
 // the filter.
 var imageColumns = []components.Column{
@@ -134,8 +136,26 @@ func (v *imagesView) Indicators() []string {
 	return ind
 }
 
+// KeyHelp returns the view's bindings in priority order, as copies: the
+// row actions are disabled when no row is selected, and `enter` when no
+// container uses the selected image. Key presses are still matched against
+// keys.Images, so a disabled hint never disables its key.
 func (v *imagesView) KeyHelp() []key.Binding {
-	return append(keys.Images.Bindings(), keys.Table.Filter)
+	km := keys.Images
+	ctrs, inspect, del := km.Containers, km.Inspect, km.Delete
+	r, ok := v.selected()
+	switch {
+	case !ok:
+		disable(&ctrs, &inspect, &del)
+	case v.snap.ImageUseCount(r.img.ID) == 0:
+		disable(&ctrs)
+	}
+	return []key.Binding{ctrs, inspect, km.Pull, del, keys.Table.Filter, km.ToggleAll, km.Prune}
+}
+
+// Position reports the table's selection and row counts (ui.Positioner).
+func (v *imagesView) Position() (selected, listed, total int, filtered bool) {
+	return v.table.Position()
 }
 
 func (v *imagesView) InputFocused() bool { return v.table.InputFocused() }
@@ -238,7 +258,11 @@ func (v *imagesView) refresh() {
 			continue
 		}
 		v.shown[k] = r
-		rows = append(rows, components.Row{Key: k, Cells: []string{
+		tone := components.ToneDefault
+		if r.dangling {
+			tone = components.ToneDim
+		}
+		rows = append(rows, components.Row{Key: k, Tone: tone, Cells: []string{
 			r.label,
 			store.ShortID(r.img.ID),
 			humanSize(r.img.Size),
