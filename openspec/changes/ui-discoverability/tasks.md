@@ -69,14 +69,14 @@
 
 ## 4. Docs and integration
 
-- [ ] 4.1 Update `README.md`:
+- [x] 4.1 Update `README.md`:
   - Add `1-3`/`Tab`/`Shift+Tab` (switch resource) to the global keys table.
   - Mention the tab strip and the position indicator.
   - Note that the footer shows only applicable keys, and that `?` lists them all.
   
   Verify by checking the tables against `keys.go`.
-- [ ] 4.2 Run `gofmt -l .`, `go vet ./...`, `golangci-lint run ./...` and `go test -race ./...`, and verify all pass.
-- [ ] 4.3 Launch `go run ./cmd/drydock` against a local engine at 80x24 and at 140 columns. Verify by eye:
+- [x] 4.2 Run `gofmt -l .`, `go vet ./...`, `golangci-lint run ./...` and `go test -race ./...`, and verify all pass.
+- [x] 4.3 Launch `go run ./cmd/drydock` against a local engine at 80x24 and at 140 columns. Verify by eye:
   - tab switching, and `1` at the root being a no-op
   - counts updating when a container is created
   - row colors, and the selection on a dimmed row
