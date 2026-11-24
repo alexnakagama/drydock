@@ -218,3 +218,7 @@ To check the release configuration locally without publishing anything:
 goreleaser check
 goreleaser release --snapshot --clean
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
