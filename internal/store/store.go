@@ -160,11 +160,35 @@ func (s *Store) Do(ctx context.Context, fn func(context.Context, docker.Service)
 // ActionResultMsg carrying label. The connection state is checked when the
 // command runs, not when it is built.
 func (s *Store) Action(label string, fn func(context.Context, docker.Service) error) tea.Cmd {
+	return s.ActionWith(label, 0, func(ctx context.Context, svc docker.Service) (string, error) {
+		return "", fn(ctx, svc)
+	})
+}
+
+// ActionWith is like Action, with two differences: timeout replaces the
+// default action timeout (zero or negative keeps the default), for actions
+// that legitimately run long, such as pulls; and fn returns a detail that
+// the ActionResultMsg carries on success, for example how much space a
+// prune reclaimed. The detail is display text; it is ignored on failure.
+func (s *Store) ActionWith(label string, timeout time.Duration,
+	fn func(context.Context, docker.Service) (string, error)) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(s.actionBase(), s.cfg.actionTimeout)
+		timeout := timeout
+		if timeout <= 0 {
+			timeout = s.cfg.actionTimeout
+		}
+		ctx, cancel := context.WithTimeout(s.actionBase(), timeout)
 		defer cancel()
-		err := s.Do(ctx, fn)
-		return ActionResultMsg{Label: label, Err: s.displayError(err), Reason: s.ErrorText(err)}
+		var detail string
+		err := s.Do(ctx, func(ctx context.Context, svc docker.Service) error {
+			var err error
+			detail, err = fn(ctx, svc)
+			return err
+		})
+		if err != nil {
+			return ActionResultMsg{Label: label, Err: s.displayError(err), Reason: s.ErrorText(err)}
+		}
+		return ActionResultMsg{Label: label, Detail: detail}
 	}
 }
 

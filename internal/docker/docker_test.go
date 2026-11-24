@@ -77,6 +77,48 @@ func TestValidateImageRef(t *testing.T) {
 	}
 }
 
+func TestNormalizePullRef(t *testing.T) {
+	t.Parallel()
+	digest := "sha256:" + strings.Repeat("a", 64)
+	ok := map[string]string{
+		"redis":                     "redis:latest",
+		"redis:7":                   "redis:7",
+		"docker.io/library/redis:7": "redis:7",
+		"ghcr.io/org/app":           "ghcr.io/org/app:latest",
+		"localhost:5000/app:v1":     "localhost:5000/app:v1",
+		"nginx@" + digest:           "nginx@" + digest,
+	}
+	for in, want := range ok {
+		if got, err := NormalizePullRef(in); err != nil || got != want {
+			t.Errorf("NormalizePullRef(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "UPPER", "a b", "../x", "nginx:../../x", "nginx:tag?x=1",
+		strings.Repeat("a", 64), "sha256:" + strings.Repeat("b", 64), "sha256:0123456789ab", "redis\x1b[2J"} {
+		if _, err := NormalizePullRef(in); !IsInvalidArgument(err) {
+			t.Errorf("NormalizePullRef(%q) = %v, want invalid argument", in, err)
+		}
+	}
+}
+
+func TestRepositoryName(t *testing.T) {
+	t.Parallel()
+	digest := "sha256:" + strings.Repeat("a", 64)
+	for in, want := range map[string]string{
+		"nginx":                 "docker.io/library/nginx",
+		"nginx:1.27":            "docker.io/library/nginx",
+		"nginx@" + digest:       "docker.io/library/nginx",
+		"ghcr.io/org/app:v1":    "ghcr.io/org/app",
+		"localhost:5000/app:v1": "localhost:5000/app",
+		"UPPER":                 "",
+		"<none>:<none>":         "",
+	} {
+		if got := RepositoryName(in); got != want {
+			t.Errorf("RepositoryName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // sdkError mimics an SDK error that does not wrap its cause.
 type sdkError struct{ msg string }
 

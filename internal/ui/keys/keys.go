@@ -152,3 +152,28 @@ var Logs = LogsMap{
 	Search: key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 	Reopen: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reopen")),
 }
+
+// ImagesMap holds the images view's action keys.
+type ImagesMap struct {
+	Containers key.Binding
+	Delete     key.Binding
+	Inspect    key.Binding
+	Pull       key.Binding
+	Prune      key.Binding
+	ToggleAll  key.Binding
+}
+
+// Images is the images-view keymap.
+var Images = ImagesMap{
+	Containers: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "containers")),
+	Delete:     key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+	Inspect:    key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "inspect")),
+	Pull:       key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pull")),
+	Prune:      key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "prune dangling")),
+	ToggleAll:  key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/tagged")),
+}
+
+// Bindings returns the images-view bindings in display order.
+func (m ImagesMap) Bindings() []key.Binding {
+	return []key.Binding{m.Containers, m.Delete, m.Inspect, m.Pull, m.Prune, m.ToggleAll}
+}

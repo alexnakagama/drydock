@@ -108,8 +108,14 @@ type (
 		origin  uint64
 	}
 	trackStartMsg struct {
-		text string
-		cmd  tea.Cmd
+		text     string
+		cmd      tea.Cmd
+		progress <-chan string // optional; see TrackProgress
+	}
+	trackProgressMsg struct {
+		id       uint64
+		text     string
+		progress <-chan string
 	}
 	trackDoneMsg struct {
 		id  uint64
@@ -202,6 +208,36 @@ func Foreground(cmd tea.Cmd, dropped string) tea.Cmd {
 // as soon as the batch is returned, before the batched commands run.
 func Track(text string, cmd tea.Cmd) tea.Cmd {
 	return func() tea.Msg { return trackStartMsg{text: text, cmd: cmd} }
+}
+
+// TrackProgress is like Track, but the indicator's text is replaced by each
+// value received from progress, so a long action (a pull) can report how
+// far it has got. The producer must close progress no later than when cmd
+// returns; until then the root keeps one receive pending on it. Values are
+// display text and are cleaned before rendering. The producer should never
+// block on a send: use a buffered channel and drop or replace values the
+// UI has not consumed yet (see SendLatest).
+func TrackProgress(text string, progress <-chan string, cmd tea.Cmd) tea.Cmd {
+	return func() tea.Msg { return trackStartMsg{text: text, cmd: cmd, progress: progress} }
+}
+
+// SendLatest sends v on ch, a channel with a buffer of one that only ch's
+// producer sends on, without blocking: if the buffer holds a value the
+// consumer has not received yet, that value is replaced by v.
+func SendLatest[T any](ch chan T, v T) {
+	select {
+	case ch <- v:
+		return
+	default:
+	}
+	select {
+	case <-ch: // drop the stale value
+	default:
+	}
+	select {
+	case ch <- v:
+	default: // only reachable with several producers; drop v
+	}
 }
 
 // Success returns a command that shows a transient success message.

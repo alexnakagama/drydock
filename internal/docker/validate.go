@@ -77,3 +77,41 @@ func ValidateImageRef(s string) error {
 	}
 	return nil
 }
+
+// fullImageID matches a full image ID, with or without its algorithm.
+var fullImageID = regexp.MustCompile(`^(sha256:)?[0-9a-f]{64}$`)
+
+// NormalizePullRef checks a reference typed by the user for a pull and
+// returns it in familiar form with the default tag made explicit: "redis"
+// becomes "redis:latest" and "docker.io/library/redis:7" becomes "redis:7".
+// A reference with a digest is kept as given (normalized). Anything that is
+// not a valid name is rejected, as are image IDs: a full ID, and anything
+// starting with "sha256:", which the reference grammar would otherwise read
+// as the repository "sha256". A short hex string is a valid repository name
+// and is accepted; callers that know the local image IDs should reject
+// those themselves.
+func NormalizePullRef(s string) (string, error) {
+	if s == "" {
+		return "", cerrdefs.ErrInvalidArgument.WithMessage("empty image reference")
+	}
+	if fullImageID.MatchString(s) || strings.HasPrefix(s, "sha256:") {
+		return "", cerrdefs.ErrInvalidArgument.WithMessage(
+			"that is an image ID; pull takes a reference such as redis:7")
+	}
+	named, err := reference.ParseNormalizedNamed(s)
+	if err != nil {
+		return "", cerrdefs.ErrInvalidArgument.WithMessage(fmt.Sprintf("invalid image reference %q: %v", s, err))
+	}
+	return reference.FamiliarString(reference.TagNameOnly(named)), nil
+}
+
+// RepositoryName returns the fully qualified repository of an image
+// reference ("nginx:1.27" and "nginx@sha256:..." both give
+// "docker.io/library/nginx"), or "" if ref is not a valid reference.
+func RepositoryName(ref string) string {
+	named, err := reference.ParseNormalizedNamed(ref)
+	if err != nil {
+		return ""
+	}
+	return named.Name()
+}

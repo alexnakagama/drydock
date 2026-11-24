@@ -72,4 +72,9 @@ type ActionResultMsg struct {
 	Err error
 	// Reason is Err's text made safe for display, or "" on success.
 	Reason string
+	// Detail describes a successful outcome (see Store.ActionWith); it is
+	// "" on failure and for actions built with Store.Action. It is display
+	// text built by drydock, but may quote engine data, so render it
+	// cleaned.
+	Detail string
 }

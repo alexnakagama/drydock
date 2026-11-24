@@ -727,3 +727,38 @@ func TestMessageErrorsAreSafeToDisplay(t *testing.T) {
 		t.Errorf("Err text %q differs from Reason %q", res.Err.Error(), res.Reason)
 	}
 }
+
+func TestActionWithDetailAndTimeout(t *testing.T) {
+	t.Parallel()
+	f := populated()
+	st, rec := start(t, f, testConfig())
+	rec.state(t, StateConnected)
+
+	res := st.ActionWith("prune", 0, func(context.Context, docker.Service) (string, error) {
+		return "reclaimed 1MB", nil
+	})().(ActionResultMsg)
+	if res.Err != nil || res.Label != "prune" || res.Detail != "reclaimed 1MB" {
+		t.Errorf("success = %+v", res)
+	}
+
+	// The detail is dropped on failure.
+	res = st.ActionWith("prune", 0, func(context.Context, docker.Service) (string, error) {
+		return "ignored", errors.New("boom")
+	})().(ActionResultMsg)
+	if res.Err == nil || res.Reason != "boom" || res.Detail != "" {
+		t.Errorf("failure = %+v", res)
+	}
+
+	// A custom timeout bounds the action's context.
+	res = st.ActionWith("slow", 10*time.Millisecond, func(ctx context.Context, _ docker.Service) (string, error) {
+		dl, ok := ctx.Deadline()
+		if !ok || time.Until(dl) > 10*time.Millisecond {
+			t.Errorf("deadline %v (set %v), want within 10ms", dl, ok)
+		}
+		<-ctx.Done()
+		return "", ctx.Err()
+	})().(ActionResultMsg)
+	if !errors.Is(res.Err, context.DeadlineExceeded) {
+		t.Errorf("timed-out action = %+v", res)
+	}
+}
