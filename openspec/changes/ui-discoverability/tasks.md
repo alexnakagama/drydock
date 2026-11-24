@@ -2,16 +2,16 @@
 
 ## 1. Foundations (table tones and position, snapshot counts)
 
-- [ ] 1.1 Add `Tone` (`ToneDefault`, `ToneGood`, `ToneWarn`, `ToneDim`) to `components.Row`, and `RowGood`/`RowWarn`/`RowDim` to `StyleSet` in `styles.go` (D5). Verify with `go build ./...`.
-- [ ] 1.2 Render unselected rows with their tone's style in `Table.View`. Render the selected row from the untoned line with `TableSelected` only. Verify with `table_test.go` cases that compare against `components.Styles.*.Render(...)` output: an unselected dimmed row equals `RowDim.Render(line)`, and the same row when selected equals `TableSelected.Render(line)`.
-- [ ] 1.3 Add `Table.Position() (selected, listed, total int, filtered bool)` (D4). Verify with `table_test.go` cases:
+- [x] 1.1 Add `Tone` (`ToneDefault`, `ToneGood`, `ToneWarn`, `ToneDim`) to `components.Row`, and `RowGood`/`RowWarn`/`RowDim` to `StyleSet` in `styles.go` (D5). Verify with `go build ./...`.
+- [x] 1.2 Render unselected rows with their tone's style in `Table.View`. Render the selected row from the untoned line with `TableSelected` only. Verify with `table_test.go` cases that compare against `components.Styles.*.Render(...)` output: an unselected dimmed row equals `RowDim.Render(line)`, and the same row when selected equals `TableSelected.Render(line)`.
+- [x] 1.3 Add `Table.Position() (selected, listed, total int, filtered bool)` (D4). Verify with `table_test.go` cases:
   - unfiltered `3,12,12,false`
   - filtered `1,5,12,true`
   - filter matching nothing `0,0,12,true`
   - filter matching all rows `1,12,12,true`
   - empty without a filter `0,0,0,false`
   - after moving the selection
-- [ ] 1.4 Add `NumContainers()`, `NumImages()` and `NumVolumes()` to `store.Snapshot`. Verify with a `snapshot` test that they equal the `len` of the cloning accessors, and are 0 on the zero `Snapshot`.
+- [x] 1.4 Add `NumContainers()`, `NumImages()` and `NumVolumes()` to `store.Snapshot`. Verify with a `snapshot` test that they equal the `len` of the cloning accessors, and are 0 on the zero `Snapshot`.
 
 ## 2. Views: tones, position, context-aware key help
 

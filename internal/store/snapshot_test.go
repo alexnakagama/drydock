@@ -6,7 +6,9 @@ import (
 	"testing"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/volume"
 )
 
 func ctr(id, name, imageID string, state container.ContainerState, mounts ...container.MountPoint) container.Summary {
@@ -133,5 +135,33 @@ func TestContainerNameAndShortID(t *testing.T) {
 	}
 	if got := ShortID("abc"); got != "abc" {
 		t.Errorf("ShortID(short) = %q", got)
+	}
+}
+
+func TestSnapshotCounts(t *testing.T) {
+	t.Parallel()
+	var zero Snapshot
+	if n := zero.NumContainers() + zero.NumImages() + zero.NumVolumes(); n != 0 {
+		t.Errorf("zero Snapshot counts sum to %d, want 0", n)
+	}
+
+	snap := Snapshot{
+		seq: 1,
+		containers: []container.Summary{
+			ctr("1", "web", "sha256:a", container.StateRunning),
+			ctr("2", "old", "sha256:a", container.StateExited),
+			ctr("3", "new", "sha256:b", container.StateCreated),
+		},
+		images:  []image.Summary{{ID: "sha256:a"}, {ID: "sha256:b"}, {ID: "sha256:c"}, {ID: "sha256:d"}},
+		volumes: []volume.Volume{{Name: "data"}, {Name: "cache"}},
+	}
+	if got, want := snap.NumContainers(), len(snap.Containers()); got != want || got != 3 {
+		t.Errorf("NumContainers() = %d, want len(Containers()) = %d (3)", got, want)
+	}
+	if got, want := snap.NumImages(), len(snap.Images()); got != want || got != 4 {
+		t.Errorf("NumImages() = %d, want len(Images()) = %d (4)", got, want)
+	}
+	if got, want := snap.NumVolumes(), len(snap.Volumes()); got != want || got != 2 {
+		t.Errorf("NumVolumes() = %d, want len(Volumes()) = %d (2)", got, want)
 	}
 }
