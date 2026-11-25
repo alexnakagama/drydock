@@ -3,6 +3,7 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -177,18 +178,25 @@ func TestIntegrationRejectsInvalidIdentifiers(t *testing.T) {
 }
 
 // runITContainer starts a labelled alpine:latest container running cmd and
-// removes it when the test ends.
+// removes it when the test ends. Only stdout carries the container ID: when
+// the image has to be pulled first, docker reports the pull on stderr.
 func runITContainer(t *testing.T, cmd ...string) string {
 	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker CLI not found")
 	}
 	args := append([]string{"run", "-d", "--rm", "--label", "drydock-it=1", "alpine:latest"}, cmd...)
-	out, err := exec.Command("docker", args...).CombinedOutput()
+	c := exec.Command("docker", args...)
+	var stderr bytes.Buffer
+	c.Stderr = &stderr
+	out, err := c.Output()
 	if err != nil {
-		t.Fatalf("docker run: %v: %s", err, out)
+		t.Fatalf("docker run: %v: %s", err, stderr.Bytes())
 	}
 	id := strings.TrimSpace(string(out))
+	if err := ValidateContainerID(id); err != nil {
+		t.Fatalf("docker run printed %q, want a container ID: %v", out, err)
+	}
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
 	return id
 }

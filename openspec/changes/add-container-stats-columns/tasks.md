@@ -149,17 +149,17 @@
 
 ## 6. Documentation and integration
 
-- [ ] 6.1 In `README.md`:
+- [x] 6.1 In `README.md`:
   - Add `t` stats/ports to the Containers row of the actions table.
   - Add a short paragraph under "Using drydock": stats are off by default; they match `docker stats` (CPU summed across cores, memory excluding inactive page cache); `-` means no value is available, including for paused containers; they are read only while shown; and the `t` hint is the first footer hint dropped on narrow terminals.
 
   Verify by reading the rendered section and checking that every key in the table matches `keys.Containers`.
-- [ ] 6.2 Add `internal/ui/views/stats_integration_test.go` (`-tags integration`). It starts an `alpine:latest` container running a CPU-busy loop, labeled like the other integration resources, and removes it afterwards. With stats on against the real engine, it checks within 5 s that:
+- [x] 6.2 Add `internal/ui/views/stats_integration_test.go` (`-tags integration`). It starts an `alpine:latest` container running a CPU-busy loop, labeled like the other integration resources, and removes it afterwards. With stats on against the real engine, it checks within 5 s that:
   - the container's CPU cell shows a value above `0.0%`
   - its MEM cell matches `^[0-9.]+[KMGT]?i?B / [0-9.]+[KMGT]?i?B$`
 
   Verify with `go test -tags integration ./internal/ui/views/ -run Stats`.
-- [ ] 6.3 Run the full check list from the README's Development section and confirm everything passes:
+- [x] 6.3 Run the full check list from the README's Development section and confirm everything passes:
   - `go build ./...`
   - `gofmt -l .`
   - `go vet ./...`
