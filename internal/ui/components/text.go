@@ -82,12 +82,20 @@ func NewInput(prompt, placeholder string) textinput.Model {
 	in.Prompt = prompt
 	in.Placeholder = placeholder
 	in.CharLimit = maxInputLen
-	st := textinput.DefaultDarkStyles()
+	StyleInput(&in)
+	return in
+}
+
+// StyleInput applies the current Styles to in: the text input defaults for
+// the palette's background, drydock's prompt style and a static cursor.
+// Inputs copy their styles when they are styled, so an input that outlives
+// a palette change must be styled again (see tea.BackgroundColorMsg).
+func StyleInput(in *textinput.Model) {
+	st := textinput.DefaultStyles(Styles.Dark)
 	st.Focused.Prompt = Styles.InputPrompt
 	st.Blurred.Prompt = Styles.InputPrompt
 	st.Cursor.Blink = false // a static cursor; no timer while typing
 	in.SetStyles(st)
-	return in
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

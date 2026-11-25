@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"image/color"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -72,6 +74,9 @@ func (v *listView) Update(msg tea.Msg) tea.Cmd {
 				func() tea.Msg { return deletedMsg{key: k} })
 		}
 	case tea.PasteMsg:
+		_, cmd := v.table.Update(msg)
+		return cmd
+	case tea.BackgroundColorMsg:
 		_, cmd := v.table.Update(msg)
 		return cmd
 	case deletedMsg:
@@ -760,6 +765,86 @@ func TestPrompt(t *testing.T) {
 	h.press("enter")
 	if len(got) != 2 || got[1] != "" {
 		t.Errorf("empty submit: %v", got)
+	}
+}
+
+// TestInitRequestsBackgroundColor checks that the model asks the terminal
+// for its background color when it starts, which the palette depends on.
+func TestInitRequestsBackgroundColor(t *testing.T) {
+	want := reflect.TypeOf(tea.RequestBackgroundColor())
+	m := New([]Resource{{Name: "containers", New: func(store.Snapshot) View { return newListView("containers") }}}, "containers")
+	for _, msg := range uitest.Run(t, m.Init()) {
+		if reflect.TypeOf(msg) == want {
+			return
+		}
+	}
+	t.Error("Init does not request the terminal background color")
+}
+
+// TestBackgroundColorSwapsPalette checks that a light background report
+// switches to the light palette, including the prompts of text inputs that
+// were created, and are open, before the report, and that only colors
+// change.
+func TestBackgroundColorSwapsPalette(t *testing.T) {
+	dark, light := components.NewStyles(true), components.NewStyles(false)
+	if dark.InputPrompt.Render(":") == light.InputPrompt.Render(":") {
+		t.Fatal("dark and light InputPrompt render the same; the test cannot tell them apart")
+	}
+	screen := func(h *harness) string { return h.m.render() }
+	// A dialog is checked before it is composited over the screen, which
+	// merges its first style run with the next.
+	dialog := func(h *harness) string { return h.m.overlayView() }
+	cases := []struct {
+		name   string
+		open   func(h *harness)
+		prompt string
+		raw    func(h *harness) string // where the prompt is rendered
+	}{
+		{"command bar", func(h *harness) { h.press(":") }, ":", screen},
+		{"list filter", func(h *harness) { h.press("/"); h.typeText("we") }, "/", screen},
+		{"prompt", func(h *harness) { h.send(Prompt("Volume name", "name", nil)) }, "> ", dialog},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// components.Styles is a package global: this test must not run
+			// in parallel with any test that renders.
+			saved := components.Styles
+			t.Cleanup(func() { components.Styles = saved })
+
+			h := newHarness(t)
+			if !components.Styles.Dark {
+				t.Fatal("light palette in use before the terminal reported its background")
+			}
+			c.open(h)
+			before, raw := h.m.render(), c.raw(h)
+			if !strings.Contains(raw, dark.InputPrompt.Render(c.prompt)) {
+				t.Fatalf("before the report, %q prompt not in the dark style:\n%q", c.prompt, raw)
+			}
+
+			h.update(tea.BackgroundColorMsg{Color: color.White})
+			if components.Styles.Dark {
+				t.Fatal("dark palette still in use after a light background report")
+			}
+			after, raw := h.m.render(), c.raw(h)
+			if !strings.Contains(raw, light.InputPrompt.Render(c.prompt)) {
+				t.Errorf("after the report, %q prompt not in the light style:\n%q", c.prompt, raw)
+			}
+			if strings.Contains(raw, dark.InputPrompt.Render(c.prompt)) {
+				t.Errorf("after the report, %q prompt still in the dark style", c.prompt)
+			}
+			if b, a := ansi.Strip(before), ansi.Strip(after); b != a {
+				t.Errorf("text changed with the palette:\n--- before ---\n%s\n--- after ---\n%s", b, a)
+			}
+
+			// A dark report switches back.
+			h.update(tea.BackgroundColorMsg{Color: color.Black})
+			if !components.Styles.Dark {
+				t.Error("light palette still in use after a dark background report")
+			}
+			if got := c.raw(h); !strings.Contains(got, dark.InputPrompt.Render(c.prompt)) {
+				t.Errorf("after a dark report, %q prompt not in the dark style", c.prompt)
+			}
+		})
 	}
 }
 

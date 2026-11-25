@@ -117,6 +117,10 @@ func (v *volumesView) Update(msg tea.Msg) tea.Cmd {
 	case tea.PasteMsg:
 		_, cmd := v.table.Update(msg)
 		return cmd
+	case tea.BackgroundColorMsg:
+		// The palette changed: the filter input restyles itself.
+		_, cmd := v.table.Update(msg)
+		return cmd
 	case tea.KeyPressMsg:
 		return v.handleKey(msg)
 	default:
