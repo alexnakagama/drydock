@@ -83,12 +83,23 @@ type Table struct {
 	filter    string // applied filter, as typed
 	filtering bool   // filter input focused
 	input     textinput.Model
+
+	// keepKey is the key of the row that was selected when SetColumns
+	// cleared the rows; the next SetRows restores the selection to it, and
+	// the scroll offset to keepOffset, or falls back to the row at
+	// keepCursor if the key is gone. hasKeepKey tells an empty key from
+	// none. They are needed because anything that clamps the cursor or the
+	// offset while no rows are set (a resize, a filter edit) resets them.
+	keepKey    string
+	keepCursor int
+	keepOffset int
+	hasKeepKey bool
 }
 
 // NewTable returns an empty table with the given columns.
 func NewTable(cols []Column) Table {
 	return Table{
-		cols:      cols,
+		cols:      slices.Clone(cols),
 		emptyText: "No items.",
 		input:     NewInput("/", "filter"),
 	}
@@ -104,6 +115,23 @@ func (t *Table) SetSize(width, height int) {
 	t.width, t.height = max(width, 0), max(height, 0)
 	t.input.SetWidth(max(t.width-2, 1))
 	t.clampOffset()
+}
+
+// SetColumns replaces the columns. It drops the rows, whose cells are laid
+// out for the old columns, and keeps the filter text, the selected key and
+// the scroll offset: the next SetRows, which the caller must make with rows
+// of the new width, restores the selection to the same key and re-applies
+// the filter to the new filter columns. Until then the table renders the new
+// header over an empty body. The table keeps its own copy of cols.
+func (t *Table) SetColumns(cols []Column) {
+	if r, ok := t.Selected(); ok {
+		// A second SetColumns before SetRows finds no selection and must
+		// not forget what the first one kept.
+		t.keepKey, t.keepCursor, t.keepOffset, t.hasKeepKey = r.Key, t.cursor, t.offset, true
+	}
+	t.cols = slices.Clone(cols)
+	t.all, t.visible = nil, nil
+	t.lowered, t.cellWidth, t.natural = nil, nil, nil
 }
 
 // SetRows replaces the rows. The selection stays on the row with the same
@@ -127,6 +155,7 @@ func (t *Table) SetRows(rows []Row) {
 		}
 	}
 	t.refilter(false)
+	t.keepKey, t.keepCursor, t.keepOffset, t.hasKeepKey = "", 0, 0, false
 }
 
 // Selected returns the selected row, or false if the table shows no rows.
@@ -290,6 +319,11 @@ func (t *Table) setFilter(f string) {
 func (t *Table) refilter(filterChanged bool) {
 	prev, hadPrev := t.Selected()
 	prevIdx := t.cursor
+	kept := !hadPrev && t.hasKeepKey
+	if kept {
+		// SetColumns cleared the rows: follow what was selected before.
+		prev, hadPrev, prevIdx = Row{Key: t.keepKey}, true, t.keepCursor
+	}
 
 	needle := strings.ToLower(strings.TrimSpace(t.filter))
 	t.visible = t.visible[:0:0]
@@ -308,6 +342,10 @@ func (t *Table) refilter(filterChanged bool) {
 
 	switch {
 	case hadPrev && t.Select(prev.Key):
+		if kept {
+			t.offset = t.keepOffset
+			t.clampOffset()
+		}
 		return
 	case filterChanged:
 		t.cursor = 0

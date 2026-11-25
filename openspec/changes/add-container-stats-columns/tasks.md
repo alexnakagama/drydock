@@ -60,7 +60,7 @@
 
 ## 3. Table: switching column sets
 
-- [ ] 3.1 In `internal/ui/components/table.go`, add `SetColumns(cols []Column)` as in design.md D5:
+- [x] 3.1 In `internal/ui/components/table.go`, add `SetColumns(cols []Column)` as in design.md D5:
   - It replaces the columns and clears the column-dependent row data (`all`, `cellWidth`, `lowered`, `visible`, `natural`).
   - It keeps the filter text, the selected key and the scroll offset.
   - Callers then call `SetRows` with rows of the new width.
