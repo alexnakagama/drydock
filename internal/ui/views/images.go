@@ -90,10 +90,11 @@ func (r imageRow) key() string { return r.img.ID + "\x00" + r.ref }
 // imagesView lists images, one row per tag, and acts on the selected one.
 // Dangling images are hidden until `a` is pressed.
 type imagesView struct {
-	st   *store.Store
-	snap store.Snapshot
-	cfg  imagesConfig
-	all  bool
+	st    *store.Store
+	snap  store.Snapshot
+	cfg   imagesConfig
+	all   bool
+	prefs *Prefs // shared with the containers views it opens
 
 	table components.Table
 	// shown maps the keys of the listed rows to their data in snap.
@@ -101,16 +102,18 @@ type imagesView struct {
 }
 
 // NewImages returns the images view, listing tagged images until `a` is
-// pressed.
-func NewImages(st *store.Store, snap store.Snapshot) ui.View {
-	return newImagesView(st, snap, defaultImagesConfig())
+// pressed. prefs are the session's settings, passed on to the containers
+// views it opens; nil gives the view settings of its own.
+func NewImages(st *store.Store, snap store.Snapshot, prefs *Prefs) ui.View {
+	return newImagesView(st, snap, prefs, defaultImagesConfig())
 }
 
-func newImagesView(st *store.Store, snap store.Snapshot, cfg imagesConfig) *imagesView {
+func newImagesView(st *store.Store, snap store.Snapshot, prefs *Prefs, cfg imagesConfig) *imagesView {
 	v := &imagesView{
 		st:    st,
 		snap:  snap,
 		cfg:   cfg,
+		prefs: orNewPrefs(prefs),
 		table: components.NewTable(imageColumns),
 	}
 	v.refresh()
@@ -512,7 +515,7 @@ func (v *imagesView) inspect(r imageRow) tea.Cmd {
 // or stopped, created from the selected image.
 func (v *imagesView) showContainers(r imageRow) tea.Cmd {
 	id, name := r.img.ID, r.name()
-	return ui.Push(NewFilteredContainers(v.st, v.snap, []string{name, "containers"},
+	return ui.Push(NewFilteredContainers(v.st, v.snap, v.prefs, []string{name, "containers"},
 		"No containers use "+name+".", func(c container.Summary) bool { return c.ImageID == id }))
 }
 

@@ -455,7 +455,7 @@ func TestFilteredContainersView(t *testing.T) {
 
 	nginxID := "sha256:" + strings.Repeat("n", 64)
 	snap := e.root().snap
-	v := NewFilteredContainers(e.st, snap, []string{"nginx:1.27", "containers"}, "No containers use this image.",
+	v := NewFilteredContainers(e.st, snap, e.prefs, []string{"nginx:1.27", "containers"}, "No containers use this image.",
 		func(c container.Summary) bool { return c.ImageID == nginxID })
 	e.push(v)
 
@@ -494,7 +494,7 @@ func TestFilteredContainersView(t *testing.T) {
 
 func TestFilteredContainersEmpty(t *testing.T) {
 	e := newEnv(t, dockerfake.New(), 100, 8)
-	e.push(NewFilteredContainers(e.st, e.root().snap, []string{"x", "containers"}, "No containers use this image.",
+	e.push(NewFilteredContainers(e.st, e.root().snap, e.prefs, []string{"x", "containers"}, "No containers use this image.",
 		func(container.Summary) bool { return false }))
 	if !strings.Contains(e.screen(), "No containers use this image.") {
 		t.Errorf("screen:\n%s", e.screen())

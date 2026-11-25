@@ -142,11 +142,11 @@ func TestContainersKeyHelp(t *testing.T) {
 		name string
 		want []string
 	}{
-		{"web", []string{"l logs", "s stop", "x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter"}},
-		{"old", []string{"l logs", "s start", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter"}},
-		{"fresh", []string{"l logs", "s start", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter"}},
-		{"frozen", []string{"l logs", "-s start/stop", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter"}},
-		{"boot", []string{"l logs", "-s start/stop", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter"}},
+		{"web", []string{"l logs", "s stop", "x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "t stats"}},
+		{"old", []string{"l logs", "s start", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "t stats"}},
+		{"fresh", []string{"l logs", "s start", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "t stats"}},
+		{"frozen", []string{"l logs", "-s start/stop", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "t stats"}},
+		{"boot", []string{"l logs", "-s start/stop", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "t stats"}},
 	}
 	for _, tt := range tests {
 		e.selectRow(tt.name)
@@ -157,7 +157,7 @@ func TestContainersKeyHelp(t *testing.T) {
 func TestContainersKeyHelpEmpty(t *testing.T) {
 	e := newEnv(t, dockerfake.New(), 100, 8)
 	checkHelp(t, "empty list", e.root().KeyHelp(), []string{
-		"-l logs", "-s start/stop", "-x shell", "-i inspect", "-r restart", "-d delete", "a all/running", "/ filter",
+		"-l logs", "-s start/stop", "-x shell", "-i inspect", "-r restart", "-d delete", "a all/running", "/ filter", "t stats",
 	})
 
 	// A filter matching nothing leaves no selection either.
@@ -167,7 +167,7 @@ func TestContainersKeyHelpEmpty(t *testing.T) {
 	e.typeText("zzz")
 	e.press("enter")
 	checkHelp(t, "filtered to nothing", e.root().KeyHelp(), []string{
-		"-l logs", "-s start/stop", "-x shell", "-i inspect", "-r restart", "-d delete", "a all/running", "/ filter",
+		"-l logs", "-s start/stop", "-x shell", "-i inspect", "-r restart", "-d delete", "a all/running", "/ filter", "t stats",
 	})
 }
 

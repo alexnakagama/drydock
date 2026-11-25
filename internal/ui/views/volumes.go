@@ -42,23 +42,27 @@ var _ ui.Positioner = (*volumesView)(nil)
 
 // volumesView lists volumes and acts on the selected one.
 type volumesView struct {
-	st   *store.Store
-	snap store.Snapshot
+	st    *store.Store
+	snap  store.Snapshot
+	prefs *Prefs // shared with the containers views it opens
 
 	table components.Table
 	// shown maps the names of the listed volumes to their data in snap.
 	shown map[string]volume.Volume
 }
 
-// NewVolumes returns the volumes view.
-func NewVolumes(st *store.Store, snap store.Snapshot) ui.View {
-	return newVolumesView(st, snap)
+// NewVolumes returns the volumes view. prefs are the session's settings,
+// passed on to the containers views it opens; nil gives the view settings of
+// its own.
+func NewVolumes(st *store.Store, snap store.Snapshot, prefs *Prefs) ui.View {
+	return newVolumesView(st, snap, prefs)
 }
 
-func newVolumesView(st *store.Store, snap store.Snapshot) *volumesView {
+func newVolumesView(st *store.Store, snap store.Snapshot, prefs *Prefs) *volumesView {
 	v := &volumesView{
 		st:    st,
 		snap:  snap,
+		prefs: orNewPrefs(prefs),
 		table: components.NewTable(volumeColumns),
 	}
 	v.refresh()
@@ -341,7 +345,7 @@ func (v *volumesView) inspect(name string) tea.Cmd {
 // showContainers pushes a containers view listing the containers, running
 // or stopped, that mount the named volume.
 func (v *volumesView) showContainers(name string) tea.Cmd {
-	return ui.Push(NewFilteredContainers(v.st, v.snap, []string{name, "containers"},
+	return ui.Push(NewFilteredContainers(v.st, v.snap, v.prefs, []string{name, "containers"},
 		"No containers mount "+name+".", func(c container.Summary) bool { return mountsVolume(c, name) }))
 }
 

@@ -655,7 +655,7 @@ func TestCreateVolumeRejectsPathLikeNames(t *testing.T) {
 }
 
 func TestVolumesBeforeLoad(t *testing.T) {
-	v := newVolumesView(store.New(dockerfake.New(), func(tea.Msg) {}), store.Snapshot{})
+	v := newVolumesView(store.New(dockerfake.New(), func(tea.Msg) {}), store.Snapshot{}, nil)
 	v.SetSize(80, 6)
 	if !strings.Contains(ansi.Strip(v.View()), "Loading volumes…") {
 		t.Errorf("view before load:\n%s", v.View())

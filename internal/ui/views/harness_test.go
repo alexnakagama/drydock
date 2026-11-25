@@ -26,6 +26,9 @@ var update = flag.Bool("update", false, "rewrite golden files")
 
 const waitTimeout = 5 * time.Second
 
+// testStatsFlush is how often stats batches reach the views in tests.
+const testStatsFlush = 20 * time.Millisecond
+
 // env runs the real root model and store against a fake engine, like a
 // small tea.Program: commands run in goroutines and their messages, and the
 // store's, are delivered to the model on the test goroutine by until and
@@ -44,13 +47,18 @@ type env struct {
 	images     []*imagesView
 	volumes    []*volumesView
 	logs       []*logsView
+	// pushed are the containers views a test pushed itself, for helpers
+	// that act on the top containers view.
+	pushed []*containersView
 
 	execMu sync.Mutex
 	execs  []*exec.Cmd // shells actually handed the terminal
 
-	// execEnv and logsCfg configure the views the model creates.
+	// execEnv and logsCfg configure the views the model creates, and prefs
+	// are the session settings they share.
 	execEnv execEnv
 	logsCfg logsConfig
+	prefs   *Prefs
 	// execResult is returned by the fake terminal handover.
 	execResult error
 }
@@ -58,7 +66,7 @@ type env struct {
 func newEnv(t *testing.T, f *dockerfake.Service, width, height int) *env {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	e := &env{t: t, f: f, in: make(chan tea.Msg, 256), ctx: ctx}
+	e := &env{t: t, f: f, in: make(chan tea.Msg, 256), ctx: ctx, prefs: &Prefs{}}
 	e.logsCfg = defaultLogsConfig()
 	e.execEnv = execEnv{
 		lookPath: func(string) (string, error) { return "/usr/bin/docker", nil },
@@ -78,24 +86,24 @@ func newEnv(t *testing.T, f *dockerfake.Service, width, height int) *env {
 		case e.in <- msg:
 		case <-ctx.Done():
 		}
-	})
+	}, store.WithStatsTimings(testStatsFlush, 20*time.Millisecond, 20*time.Millisecond, 100*time.Millisecond))
 	storeDone := make(chan struct{})
 	go func() { defer close(storeDone); _ = e.st.Run(ctx) }()
 
 	e.m = ui.New([]ui.Resource{
 		{Name: "containers", Aliases: []string{"co"}, New: func(snap store.Snapshot) ui.View {
-			v := newContainersView(e.st, snap, []string{"containers"}, "No containers.", nil, false, e.execEnv)
+			v := newContainersView(e.st, snap, e.prefs, []string{"containers"}, "No containers.", nil, false, e.execEnv)
 			e.wrapLogs(v)
 			e.containers = append(e.containers, v)
 			return v
 		}, Count: store.Snapshot.NumContainers},
 		{Name: "images", Aliases: []string{"im"}, New: func(snap store.Snapshot) ui.View {
-			v := newImagesView(e.st, snap, imagesConfig{now: func() time.Time { return testNow }})
+			v := newImagesView(e.st, snap, e.prefs, imagesConfig{now: func() time.Time { return testNow }})
 			e.images = append(e.images, v)
 			return v
 		}, Count: store.Snapshot.NumImages},
 		{Name: "volumes", Aliases: []string{"vol"}, New: func(snap store.Snapshot) ui.View {
-			v := newVolumesView(e.st, snap)
+			v := newVolumesView(e.st, snap, e.prefs)
 			e.volumes = append(e.volumes, v)
 			return v
 		}, Count: store.Snapshot.NumVolumes},

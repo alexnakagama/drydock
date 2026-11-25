@@ -91,7 +91,7 @@
 
 ## 5. Containers view: toggle, columns, live cells
 
-- [ ] 5.1 Add the toggle and the session-wide setting (design.md D4, D8):
+- [x] 5.1 Add the toggle and the session-wide setting (design.md D4, D8):
   - Add `Stats` (`t`, help `stats`) to `keys.Containers` in `internal/ui/keys/keys.go`, and include it in `ContainersMap.Bindings()`.
   - Add `views.Prefs{Stats bool}`, created once in `views.Resources` and passed to `NewContainers`, `NewImages`, `NewVolumes`, and on to `NewFilteredContainers`.
   - Update the constructors' callers and the test harnesses.
@@ -100,7 +100,7 @@
   - `keys_test.go`: no key clash in the containers map.
   - A `views` test: a zero `Prefs` means stats off, so a fresh `Resources` starts with stats off, as after a restart.
   - `go test ./internal/ui/...` passes after updating the `keyhelp_test.go` expectations to include `t` last.
-- [ ] 5.2 In `internal/ui/views/containers.go`, add the stats layout and cells (design.md D5, D6, D7, D8):
+- [x] 5.2 In `internal/ui/views/containers.go`, add the stats layout and cells (design.md D5, D6, D7, D8):
   - Add `statsColumns`, and `formatCPU` and `formatMem` (`units.BytesSize(float64(...))`).
   - Render CPU and MEM cells from the latest batch for this view, with `-` for containers whose state is not `running`, for missing values, and while the view's last known connection state (initialized from `st.State()`, updated from `ConnectionMsg`) is not connected. Discard batches that arrive while not connected.
   - On `t`, flip `Prefs.Stats`, call `SetColumns`, and rebuild rows.
@@ -116,7 +116,7 @@
   - A view created while the store is disconnected shows `-`.
   - The selected container stays selected across a batch.
   - Help lists `t`.
-- [ ] 5.3 Implement `SetActive` on the containers view (design.md D3):
+- [x] 5.3 Implement `SetActive` on the containers view (design.md D3):
   - Hold a `StatsSub` only while active and `Prefs.Stats` is on.
   - Receive batches with a `wait()` command like `logsView`.
   - Call `SetTargets` with the IDs of listed containers whose state is `running`, before filtering, after each applied snapshot and on toggle.
@@ -130,7 +130,7 @@
   - `t` off, deactivation and `Close` each bring the count back to 0.
   - A container started via a snapshot gains a stream and shows values in a later batch. A stopped one loses its stream.
   - A batch with changed values updates the cells without user input.
-- [ ] 5.4 Add golden snapshots in `internal/ui/views/testdata`:
+- [x] 5.4 Add golden snapshots in `internal/ui/views/testdata`:
   - `containers_stats_100x10.golden`: values present, one stopped container in all mode.
   - `containers_stats_pending_100x10.golden`: before the first sample.
 
@@ -140,7 +140,7 @@
   - Run `go test ./internal/ui/... -update` once, read each new file, and confirm that no CPU or MEM cell is cut at 100 columns.
   - In every changed existing golden, check with `git diff` that only the footer line changed.
   - `go test ./internal/ui/...` passes without `-update`.
-- [ ] 5.5 In `internal/ui/views/root_test.go`, cover the session-wide setting end to end on the root model, using short stats timings. Verify with `go test -race ./internal/ui/...`:
+- [x] 5.5 In `internal/ui/views/root_test.go`, cover the session-wide setting end to end on the root model, using short stats timings. Verify with `go test -race ./internal/ui/...`:
   - Stats are off at startup and no stream is open.
   - With `t` on, `Enter` on an image opens a drill-down that shows CPU and MEM.
   - Switching to images closes all stats streams, and switching back reopens them.

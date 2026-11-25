@@ -51,3 +51,25 @@ func TestSwitchKeysReserved(t *testing.T) {
 		}
 	}
 }
+
+// TestContainersKeysDistinct fails if two bindings the containers view
+// answers to share a key: its own actions, the list keys it shares with
+// every list view, and the global keys the root takes before it.
+func TestContainersKeysDistinct(t *testing.T) {
+	bs := slices.Concat(Containers.Bindings(), Table.Bindings(),
+		[]key.Binding{Global.Command, Global.Help, Global.Back, Global.Quit, Global.ForceQuit},
+		Global.TabKeys(), []key.Binding{Global.NextTab, Global.PrevTab})
+	owner := map[string]string{}
+	for _, b := range bs {
+		for _, k := range b.Keys() {
+			if prev, ok := owner[k]; ok {
+				t.Errorf("key %q is bound by both %q and %q", k, prev, b.Help().Desc)
+				continue
+			}
+			owner[k] = b.Help().Desc
+		}
+	}
+	if b := Containers.Stats; !slices.Equal(b.Keys(), []string{"t"}) || b.Help().Key != "t" {
+		t.Errorf("Stats binding = keys %q help %q, want t", b.Keys(), b.Help().Key)
+	}
+}
