@@ -20,10 +20,13 @@ import (
 
 // baseChromeLines is the number of lines around the content area that are
 // always drawn: the header, the status line and the footer. The resource
-// tab strip adds one more on terminals of at least minTabsHeight lines.
+// tab strip adds one more on terminals of at least minTabsHeight lines,
+// and the rule below it another on terminals of at least minRuleHeight
+// lines.
 const (
 	baseChromeLines = 3
 	minTabsHeight   = 5
+	minRuleHeight   = 12
 )
 
 // showTabs reports whether the resource tab strip is drawn. It is left out
@@ -31,12 +34,20 @@ const (
 // their lines.
 func (m *Model) showTabs() bool { return m.height >= minTabsHeight }
 
+// showRule reports whether the rule below the tab strip is drawn. Short
+// terminals keep that line for the content instead.
+func (m *Model) showRule() bool { return m.showTabs() && m.height >= minRuleHeight }
+
 // chromeLines returns the number of lines around the content area.
 func (m *Model) chromeLines() int {
+	n := baseChromeLines
 	if m.showTabs() {
-		return baseChromeLines + 1
+		n++
 	}
-	return baseChromeLines
+	if m.showRule() {
+		n++
+	}
+	return n
 }
 
 // contentSize returns the size of the area views render into.
@@ -52,17 +63,26 @@ func (m *Model) View() tea.View {
 	return v
 }
 
-// render draws the full screen: header, resource tabs, content (with any
-// overlay on top), status line and footer, each fitted to the terminal
-// width.
+// render draws the full screen: header, resource tabs, the rule below
+// them, content (with any overlay on top), status line and footer, each
+// fitted to the terminal width.
 func (m *Model) render() string {
 	if m.quitting || len(m.stack) == 0 || m.width <= 0 || m.height <= 0 {
 		return ""
 	}
 	_, ch := m.contentSize()
-	content := m.top().View()
-	if dialog := m.overlayView(); dialog != "" {
-		content = place(content, dialog, m.width, ch)
+	// The body is the content area and the rule above it. An overlay is
+	// centred over the whole body: the rule is decoration only, so a tall
+	// dialog (the help overlay at 80x24) may cover it rather than be cut.
+	var body []string
+	if m.showRule() {
+		body = append(body, components.Styles.Rule.Render(strings.Repeat("─", m.width)))
+	}
+	if ch > 0 {
+		body = append(body, padLines(m.top().View(), m.width, ch)...)
+	}
+	if dialog := m.overlayView(); dialog != "" && len(body) > 0 {
+		body = padLines(place(strings.Join(body, "\n"), dialog, m.width, len(body)), m.width, len(body))
 	}
 
 	lines := make([]string, 0, m.height)
@@ -70,18 +90,20 @@ func (m *Model) render() string {
 	if m.showTabs() {
 		lines = append(lines, m.tabsView())
 	}
-	if ch > 0 {
-		lines = append(lines, padLines(content, m.width, ch)...)
-	}
+	lines = append(lines, body...)
 	lines = append(lines, m.statusView(), m.footerView())
 	// A terminal shorter than the chrome shows only what fits, header first.
 	return strings.Join(lines[:min(len(lines), m.height)], "\n")
 }
 
 // headerView renders the breadcrumb, the top view's indicators and the
-// connection state.
+// connection state on the header bar, which spans the full width. Every
+// span in the line, padding included, carries the bar background: each
+// styled span ends with a full reset, so an unstyled space would leave a
+// hole in the bar.
 func (m *Model) headerView() string {
 	st := components.Styles
+	sp := st.HeaderBar.Render(" ")
 	crumbs := []string{"drydock"}
 	for _, e := range m.stack {
 		for _, c := range e.view.Crumbs() {
@@ -94,7 +116,7 @@ func (m *Model) headerView() string {
 		left = st.Crumb.Render(crumbs[0])
 	}
 	for _, ind := range m.top().Indicators() {
-		left += " " + st.Indicator.Render("["+components.Truncate(components.Clean(ind), 30)+"]")
+		left += sp + st.Indicator.Render("["+components.Truncate(components.Clean(ind), 30)+"]")
 	}
 
 	right := m.connectionView(false)
@@ -104,10 +126,27 @@ func (m *Model) headerView() string {
 		right = m.connectionView(true)
 		gap = m.width - ansi.StringWidth(right) - 1
 		if gap < 1 {
-			return components.Fit(right, m.width)
+			return fitBar(right, m.width)
 		}
 	}
-	return components.Fit(" "+left, gap) + right + " "
+	return fitBar(sp+left, gap) + right + sp
+}
+
+// fitBar is components.Fit for the header line: s, made only of spans
+// carrying the bar background, is cut or padded to exactly width cells,
+// with the padding drawn on the bar too. A cut keeps the escape sequences
+// after it, so the ellipsis lands inside the span that was cut.
+func fitBar(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) > width {
+		s = ansi.Truncate(s, width, "…")
+	}
+	if pad := width - ansi.StringWidth(s); pad > 0 {
+		s += components.Styles.HeaderBar.Render(strings.Repeat(" ", pad))
+	}
+	return s
 }
 
 // tabsView renders the resource tab strip, with the top view's list
@@ -140,9 +179,12 @@ func (m *Model) tabsView() string {
 	return " " + components.Fit(tabs, avail) + " " + right
 }
 
-// tabLabels renders every resource tab: its number (if a key selects it),
-// its name (or, if short, its first alias) and its count once the first
-// snapshot has loaded. The tab of the stack's root resource is highlighted.
+// tabLabels renders every resource tab as a pill: its number (if a key
+// selects it), its name (or, if short, its first alias) and, once the
+// first snapshot has loaded, its count in parentheses, so the count cannot
+// be mistaken for the number. The tab of the stack's root resource is a
+// filled pill. Active and inactive pills are padded alike, so switching
+// tabs never moves the labels, and that padding separates them.
 func (m *Model) tabLabels(short bool) string {
 	st := components.Styles
 	numbered := len(keys.Global.TabKeys())
@@ -158,15 +200,15 @@ func (m *Model) tabLabels(short bool) string {
 		}
 		label = append(label, components.Clean(name))
 		if r.Count != nil && m.snap.Loaded() {
-			label = append(label, strconv.Itoa(r.Count(m.snap)))
+			label = append(label, "("+strconv.Itoa(r.Count(m.snap))+")")
 		}
-		style := st.Tab
+		style := st.TabPill
 		if i == m.rootIdx {
-			style = st.TabActive
+			style = st.TabPillActive
 		}
 		parts = append(parts, style.Render(strings.Join(label, " ")))
 	}
-	return strings.Join(parts, "  ")
+	return strings.Join(parts, " ")
 }
 
 // positionView renders the top view's list position, or "" if the top view

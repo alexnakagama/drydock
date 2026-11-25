@@ -128,19 +128,28 @@ go install ./cmd/drydock
 ## Using drydock
 
 On terminals at least 5 lines tall, a tab strip below the header lists the
-resources with their counts, for example
-`1 containers 12  2 images 34  3 volumes 5`, and highlights the one the
-current view belongs to. Counts appear once the first snapshot has loaded.
+resources as pills with their counts in parentheses, for example
+`1 containers (12)`, `2 images (34)` and `3 volumes (5)`, and fills the pill
+of the one the current view belongs to. On narrow terminals the tabs use
+short aliases instead, for example `1 co (12)`. Counts appear once the first
+snapshot has loaded.
 They are engine totals: every container whatever the `a` toggle, and every
 image object, dangling ones included. On the right of the strip, list views
 show the selected row and how many rows are listed: `3/12`, or `3/5 of 12`
 while a filter is applied. The number after `of` counts the rows of the
-current view, so with `a` off it can be lower than the tab count.
+current view, so with `a` off it can be lower than the tab count. On
+terminals at least 12 lines tall, a thin rule separates the tab strip from
+the list.
 
 Rows are colored by state. Running containers are green. Paused and
 restarting containers are orange. Exited, created and dead containers,
-dangling images and unused volumes are dimmed. The selected row is shown in
-reverse video, without its state color.
+dangling images and unused volumes are dimmed. The containers view also
+starts each STATUS cell with a state glyph: `●` running, `◐` paused or
+restarting, `○` exited, created or dead. The selected row is highlighted and
+marked with `▌` in its leftmost column, without its state color; its glyph
+still shows its state. Colors follow the terminal's light or dark
+background, and the marker and glyphs keep the selection and states readable
+without color (for example with `NO_COLOR` set).
 
 The footer shows only the keys that apply to the selected row, most
 important first. For example, `x shell` appears only on a running container,

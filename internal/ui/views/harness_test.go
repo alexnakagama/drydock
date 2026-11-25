@@ -259,11 +259,15 @@ func (e *env) statusLine() string {
 }
 
 // content returns the lines of the content area (between the header, or
-// the resource tab strip below it, and the status line), right-trimmed.
+// the resource tab strip or the rule below it, and the status line),
+// right-trimmed.
 func (e *env) content() []string {
 	ls := e.lines()
 	first := 1
-	if len(ls) >= 5 { // the tab strip is shown from 5 lines
+	switch {
+	case len(ls) >= 12: // the rule below the tabs is drawn from 12 lines
+		first = 3
+	case len(ls) >= 5: // the tab strip is shown from 5 lines
 		first = 2
 	}
 	if len(ls) < first+2 {

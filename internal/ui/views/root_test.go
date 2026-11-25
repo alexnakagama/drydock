@@ -52,23 +52,23 @@ func TestTabsCountIndependentOfRunningMode(t *testing.T) {
 		t.Fatal("setup: the containers view starts in all mode")
 	}
 	tabs := e.tabsLine()
-	if !strings.Contains(tabs, "1 containers 3") || !strings.HasSuffix(tabs, " 1/1") {
-		t.Errorf("tabs %q, want containers 3 and position 1/1 (running only)", tabs)
+	if !strings.Contains(tabs, "1 containers (3)") || !strings.HasSuffix(tabs, " 1/1") {
+		t.Errorf("tabs %q, want containers (3) and position 1/1 (running only)", tabs)
 	}
 	e.press("a")
-	if tabs := e.tabsLine(); !strings.Contains(tabs, "1 containers 3") || !strings.HasSuffix(tabs, "/3") {
-		t.Errorf("all mode: tabs %q, want containers 3 and 3 rows listed", tabs)
+	if tabs := e.tabsLine(); !strings.Contains(tabs, "1 containers (3)") || !strings.HasSuffix(tabs, "/3") {
+		t.Errorf("all mode: tabs %q, want containers (3) and 3 rows listed", tabs)
 	}
 }
 
 func TestTabsCountsUpdateLive(t *testing.T) {
 	f := dockerfake.New()
 	e := newEnv(t, f, 100, 12)
-	if tabs := e.tabsLine(); !strings.Contains(tabs, "3 volumes 0") {
-		t.Fatalf("tabs %q, want volumes 0", tabs)
+	if tabs := e.tabsLine(); !strings.Contains(tabs, "3 volumes (0)") {
+		t.Fatalf("tabs %q, want volumes (0)", tabs)
 	}
 	f.AddVolume(volume.Volume{Name: "cache"})
-	e.until("volumes count", func() bool { return strings.Contains(e.tabsLine(), "3 volumes 1") })
+	e.until("volumes count", func() bool { return strings.Contains(e.tabsLine(), "3 volumes (1)") })
 }
 
 func TestTabsSwitchAndHighlightWithRealViews(t *testing.T) {
@@ -79,7 +79,7 @@ func TestTabsSwitchAndHighlightWithRealViews(t *testing.T) {
 	if h := e.header(); !strings.HasPrefix(h, "drydock > images") {
 		t.Fatalf("header %q after 2", h)
 	}
-	if raw := e.m.View().Content; !strings.Contains(raw, st.TabActive.Render("2 images 0")) {
+	if raw := e.m.View().Content; !strings.Contains(raw, st.TabPillActive.Render("2 images (0)")) {
 		t.Errorf("images tab not highlighted:\n%s", e.tabsLine())
 	}
 }
