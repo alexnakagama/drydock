@@ -2,7 +2,7 @@
 
 ## 1. Engine access: stats streams
 
-- [ ] 1.1 In `internal/docker/service.go`, add `ContainerStats(ctx, id string) (StatsStream, error)` to `docker.Service`. Add a `StatsStream` interface shaped like `PullStream`, closed when ctx is cancelled (design.md D1):
+- [x] 1.1 In `internal/docker/service.go`, add `ContainerStats(ctx, id string) (StatsStream, error)` to `docker.Service`. Add a `StatsStream` interface shaped like `PullStream`, closed when ctx is cancelled (design.md D1):
   - `Samples(ctx) iter.Seq2[container.StatsResponse, error]`
   - an idempotent `Close() error`
 
@@ -14,7 +14,7 @@
   Verify:
   - `go build ./...` passes.
   - A new case in `internal/docker/sdk_integration_test.go` (`-tags integration`): start an `alpine:latest` container running `sleep 300`, labeled like the other integration resources. Within 3 s it yields at least two samples. The first has zero `PreCPUStats.SystemUsage` and the second non-zero. Cancelling ctx ends the iteration.
-- [ ] 1.2 In `internal/docker/dockerfake/fake.go`, add:
+- [x] 1.2 In `internal/docker/dockerfake/fake.go`, add:
   - `MethodContainerStats`.
   - `SetStats(containerID string, samples ...container.StatsResponse)`, which queues samples for the container's stream.
   - `StatsStreams() int`, which reports the stats streams currently open.

@@ -3,10 +3,14 @@ package docker
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
 	"strconv"
+	"sync"
+	"sync/atomic"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
@@ -140,6 +144,18 @@ func (s *SDKService) ContainerLogs(ctx context.Context, id string, opts LogsOpti
 		Follow:     opts.Follow,
 		Tail:       tail,
 	})
+}
+
+// ContainerStats implements Service.
+func (s *SDKService) ContainerStats(ctx context.Context, id string) (StatsStream, error) {
+	if err := ValidateContainerID(id); err != nil {
+		return nil, err
+	}
+	res, err := s.cli.ContainerStats(ctx, id, client.ContainerStatsOptions{Stream: true})
+	if err != nil {
+		return nil, err
+	}
+	return &sdkStatsStream{body: res.Body}, nil
 }
 
 // ImageList implements Service.
@@ -300,3 +316,87 @@ func (p sdkPullStream) Messages(ctx context.Context) iter.Seq2[jsonstream.Messag
 }
 
 func (p sdkPullStream) Close() error { return p.res.Close() }
+
+// maxStatsRecord bounds the bytes read while decoding one stats record, on
+// top of what the decoder already buffered, so that a misbehaving endpoint
+// cannot make the decoder buffer without limit. A real record is a few
+// kilobytes.
+const maxStatsRecord = 1 << 20
+
+// errStatsRecordTooLarge ends a stats stream whose record exceeds
+// maxStatsRecord.
+var errStatsRecordTooLarge = errors.New("docker: stats record too large")
+
+// sdkStatsStream decodes the engine's stats JSON sequence.
+type sdkStatsStream struct {
+	body io.ReadCloser
+
+	once     sync.Once
+	closed   atomic.Bool
+	closeErr error
+}
+
+func (st *sdkStatsStream) Samples(ctx context.Context) iter.Seq2[container.StatsResponse, error] {
+	return func(yield func(container.StatsResponse, error) bool) {
+		defer func() { _ = st.Close() }()
+		if err := ctx.Err(); err != nil {
+			yield(container.StatsResponse{}, err)
+			return
+		}
+		if st.closed.Load() {
+			yield(container.StatsResponse{}, ErrStatsStreamClosed)
+			return
+		}
+		// Closing the body unblocks a pending read when ctx is cancelled.
+		stop := context.AfterFunc(ctx, func() { _ = st.Close() })
+		defer stop()
+
+		src := &recordLimitReader{r: st.body}
+		dec := json.NewDecoder(src)
+		for {
+			src.remaining = maxStatsRecord
+			var sample container.StatsResponse
+			if err := dec.Decode(&sample); err != nil {
+				if cerr := ctx.Err(); cerr != nil {
+					err = cerr
+				} else if st.closed.Load() {
+					err = ErrStatsStreamClosed
+				} else if errors.Is(err, io.EOF) {
+					return // the engine ended the stream: the container stopped
+				}
+				yield(container.StatsResponse{}, err)
+				return
+			}
+			if !yield(sample, nil) {
+				return
+			}
+		}
+	}
+}
+
+func (st *sdkStatsStream) Close() error {
+	st.once.Do(func() {
+		st.closed.Store(true) // before the body closes, so a failing read sees it
+		st.closeErr = st.body.Close()
+	})
+	return st.closeErr
+}
+
+// recordLimitReader fails reads once remaining bytes are used up. The
+// caller resets remaining before decoding each record.
+type recordLimitReader struct {
+	r         io.Reader
+	remaining int64
+}
+
+func (l *recordLimitReader) Read(p []byte) (int, error) {
+	if l.remaining <= 0 {
+		return 0, errStatsRecordTooLarge
+	}
+	if int64(len(p)) > l.remaining {
+		p = p[:l.remaining]
+	}
+	n, err := l.r.Read(p)
+	l.remaining -= int64(n)
+	return n, err
+}

@@ -5,7 +5,8 @@
 // a running container cannot be removed without force, and removing an
 // image reference that shares its image with other tags only untags it).
 // Mutations emit engine-style events to subscribers, and tests can inject
-// errors, drop the connection, script image pulls and feed container logs.
+// errors, drop the connection, script image pulls, and feed container logs
+// and stats samples.
 //
 // A Service is safe for concurrent use.
 package dockerfake
@@ -51,6 +52,7 @@ const (
 	MethodContainerRestart   Method = "ContainerRestart"
 	MethodContainerRemove    Method = "ContainerRemove"
 	MethodContainerLogs      Method = "ContainerLogs"
+	MethodContainerStats     Method = "ContainerStats"
 	MethodImageList          Method = "ImageList"
 	MethodImageInspect       Method = "ImageInspect"
 	MethodImagePull          Method = "ImagePull"
@@ -120,6 +122,8 @@ type Service struct {
 	shells     map[string]map[string]bool
 	execs      map[string]*execState
 	pulls      map[string]PullScript
+	stats      map[string][]container.StatsResponse // queued samples by container ID
+	statsOpen  map[*statsStream]struct{}            // streams not yet closed
 
 	errs     map[Method]error
 	errsOnce map[Method][]error
@@ -150,6 +154,8 @@ func New() *Service {
 		shells:        map[string]map[string]bool{},
 		execs:         map[string]*execState{},
 		pulls:         map[string]PullScript{},
+		stats:         map[string][]container.StatsResponse{},
+		statsOpen:     map[*statsStream]struct{}{},
 		errs:          map[Method]error{},
 		errsOnce:      map[Method][]error{},
 		subs:          map[*subscription]struct{}{},
@@ -194,9 +200,9 @@ func (s *Service) FailNext(m Method, err error) {
 	s.errsOnce[m] = append(s.errsOnce[m], err)
 }
 
-// Disconnect simulates losing the engine: every open event stream ends with
-// err (a generic connection error if err is nil), and every call fails
-// until Reconnect.
+// Disconnect simulates losing the engine: every open event and stats stream
+// ends with err (a generic connection error if err is nil), and every call
+// fails until Reconnect.
 func (s *Service) Disconnect(err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -208,6 +214,9 @@ func (s *Service) Disconnect(err error) {
 	for sub := range s.subs {
 		sub.fail(err)
 		delete(s.subs, sub)
+	}
+	for st := range s.statsOpen {
+		st.endLocked(err)
 	}
 }
 
@@ -278,7 +287,8 @@ func (s *Service) ResetCalls() {
 // AddContainer adds c, or replaces the container with the same ID, and
 // emits a container event ("create", or "update" for a replacement). A
 // zero ID gets a generated one, which is returned. Like the engine, names
-// in c.Names should carry a leading "/".
+// in c.Names should carry a leading "/". Replacing a container with one that
+// is not running ends its stats streams.
 func (s *Service) AddContainer(c container.Summary) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -290,6 +300,9 @@ func (s *Service) AddContainer(c container.Summary) string {
 	if i := s.containerIndexLocked(c.ID); i >= 0 {
 		s.containers[i] = c
 		action = events.ActionUpdate
+		if c.State != container.StateRunning {
+			s.endStatsLocked(c.ID)
+		}
 	} else {
 		s.containers = append(s.containers, c)
 	}
@@ -310,6 +323,7 @@ func (s *Service) RemoveContainer(id string) bool {
 	c := s.containers[i]
 	s.containers = slices.Delete(s.containers, i, i+1)
 	s.endLogsLocked(id)
+	s.endStatsLocked(id)
 	s.emitLocked(containerEvent(events.ActionDestroy, c))
 	return true
 }
@@ -343,6 +357,40 @@ func (s *Service) WriteLog(containerID string, stderr bool, payload string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.logBufferLocked(containerID).write(logEntry{stderr: stderr, payload: []byte(payload)})
+}
+
+// SetStats queues samples, in order, for the container's stats stream.
+// containerID may be anything ContainerStats accepts; samples for an ID
+// that matches no container are kept under that ID. Queued samples are
+// consumed: each is yielded once, by whichever open stream of the container
+// reads it first, and samples queued while no stream is open wait for the
+// next one. Stopping or removing the container hands its queue to the
+// streams that end, so a stream opened after a restart starts empty.
+func (s *Service) SetStats(containerID string, samples ...container.StatsResponse) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c, err := s.findContainerLocked(containerID); err == nil {
+		containerID = c.ID
+	}
+	for _, sample := range samples {
+		s.stats[containerID] = append(s.stats[containerID], cloneStats(sample))
+	}
+	for st := range s.statsOpen {
+		if st.containerID == containerID {
+			st.signal()
+		}
+	}
+}
+
+// StatsStreams returns the number of stats streams opened by ContainerStats
+// and not yet closed. A stream is closed by its Close, when its Samples
+// iteration ends, or when the context passed to ContainerStats is
+// cancelled; a stream the fake ended (see Disconnect) still counts until
+// then.
+func (s *Service) StatsStreams() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.statsOpen)
 }
 
 // AddImage adds img, or replaces the image with the same ID, and emits an
@@ -435,13 +483,18 @@ func (s *Service) APIVersion() string {
 	return s.apiVersion
 }
 
-// Close implements docker.Service. It ends every open event stream.
+// Close implements docker.Service. It ends every open event and stats
+// stream.
 func (s *Service) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	err := errors.New("client closed")
 	for sub := range s.subs {
-		sub.fail(errors.New("client closed"))
+		sub.fail(err)
 		delete(s.subs, sub)
+	}
+	for st := range s.statsOpen {
+		st.endLocked(err)
 	}
 	return nil
 }
@@ -606,6 +659,7 @@ func (s *Service) ContainerRemove(ctx context.Context, id string, opts docker.Co
 	removed := *c
 	s.containers = slices.DeleteFunc(s.containers, func(x container.Summary) bool { return x.ID == removed.ID })
 	s.endLogsLocked(removed.ID)
+	s.endStatsLocked(removed.ID)
 	s.emitLocked(containerEvent(events.ActionDestroy, removed))
 	if opts.RemoveVolumes {
 		for _, m := range removed.Mounts {
@@ -645,6 +699,40 @@ func (s *Service) ContainerLogs(ctx context.Context, id string, opts docker.Logs
 		tail:   opts.Tail,
 		follow: opts.Follow && isActive(c.State),
 	}), nil
+}
+
+// ContainerStats implements docker.Service. The stream yields the samples
+// queued with SetStats and waits for more. Like the engine, it ends without
+// an error when the container stops or is removed, after delivering the
+// samples queued before that, and fails for unknown and non-running
+// containers (paused and restarting included). A lost connection (see
+// Disconnect) ends it at once with an error.
+func (s *Service) ContainerStats(ctx context.Context, id string) (docker.StatsStream, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.beginLocked(ctx, MethodContainerStats, id); err != nil {
+		return nil, err
+	}
+	c, err := s.findContainerLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	if c.State != container.StateRunning {
+		return nil, cerrdefs.ErrConflict.WithMessage(fmt.Sprintf("container %s is not running", c.ID))
+	}
+	st := &statsStream{
+		svc:         s,
+		containerID: c.ID,
+		openCtx:     ctx,
+		wake:        make(chan struct{}, 1),
+		closed:      make(chan struct{}),
+	}
+	s.statsOpen[st] = struct{}{}
+	// Like the SDK, which ties the HTTP request to ctx, cancelling it closes
+	// the stream even if nobody iterates it. AfterFunc runs Close on its own
+	// goroutine, so it never runs under s.mu.
+	st.stopAfter = context.AfterFunc(ctx, st.release)
+	return st, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1052,6 +1140,7 @@ func (s *Service) stopLocked(c *container.Summary) {
 	c.State = container.StateExited
 	c.Status = "Exited (0) Less than a second ago"
 	s.endLogsLocked(c.ID)
+	s.endStatsLocked(c.ID)
 	s.emitLocked(containerEvent(events.ActionKill, *c))
 	s.emitLocked(containerEvent(events.ActionDie, *c))
 	s.emitLocked(containerEvent(events.ActionStop, *c))
@@ -1069,6 +1158,21 @@ func (s *Service) logBufferLocked(id string) *logBuffer {
 func (s *Service) endLogsLocked(id string) {
 	if b, ok := s.logs[id]; ok {
 		b.end()
+	}
+}
+
+// endStatsLocked ends the container's open stats streams cleanly, as the
+// engine does when the container stops: samples queued before the stop are
+// still delivered to those streams, then they end. The queue is detached
+// from the container, so a stream opened after a restart starts empty.
+func (s *Service) endStatsLocked(id string) {
+	tail := &statsTail{items: s.stats[id]}
+	delete(s.stats, id)
+	for st := range s.statsOpen {
+		if st.containerID == id && !st.ended {
+			st.tail = tail
+			st.endLocked(nil)
+		}
 	}
 }
 
@@ -1263,6 +1367,138 @@ func (p *pullStream) Messages(ctx context.Context) iter.Seq2[jsonstream.Message,
 		}
 		p.svc.finishPull(p.ref, p.script.Image)
 		yield(jsonstream.Message{Status: "Status: Downloaded newer image for " + p.ref}, nil)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// stats streams
+
+// statsTail holds the samples queued when a container stopped, shared by
+// the streams that the stop ended. Guarded by Service.mu.
+type statsTail struct {
+	items []container.StatsResponse
+}
+
+type statsStream struct {
+	svc         *Service
+	containerID string
+	// openCtx is the context passed to ContainerStats; cancelling it closes
+	// the stream.
+	openCtx   context.Context
+	stopAfter func() bool
+
+	wake chan struct{} // capacity 1: new samples or the stream ended
+
+	// Guarded by svc.mu.
+	ended  bool
+	endErr error      // nil for a clean end (the container stopped)
+	tail   *statsTail // samples still to deliver after a clean end
+
+	once   sync.Once
+	closed chan struct{} // closed by Close
+}
+
+// endLocked marks the stream as ended by the engine with err (nil for a
+// clean end). The caller holds st.svc.mu.
+func (st *statsStream) endLocked(err error) {
+	if st.ended {
+		return
+	}
+	st.ended, st.endErr = true, err
+	st.signal()
+}
+
+func (st *statsStream) signal() {
+	select {
+	case st.wake <- struct{}{}:
+	default:
+	}
+}
+
+// Close implements docker.StatsStream.
+func (st *statsStream) Close() error {
+	st.release()
+	st.stopAfter() // set before ContainerStats returned, so before any Close
+	return nil
+}
+
+// release closes the stream once. It is also the AfterFunc callback, which
+// may run before ContainerStats has stored stopAfter, so it must not use it.
+func (st *statsStream) release() {
+	st.once.Do(func() {
+		close(st.closed)
+		st.svc.mu.Lock()
+		delete(st.svc.statsOpen, st)
+		st.svc.mu.Unlock()
+	})
+}
+
+// aborted reports why the consumer side has ended the stream, if it has.
+func (st *statsStream) aborted(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-st.openCtx.Done():
+		return st.openCtx.Err()
+	case <-st.closed:
+		return docker.ErrStatsStreamClosed
+	default:
+		return nil
+	}
+}
+
+func (st *statsStream) Samples(ctx context.Context) iter.Seq2[container.StatsResponse, error] {
+	return func(yield func(container.StatsResponse, error) bool) {
+		defer func() { _ = st.Close() }() // Close never fails
+		for {
+			if err := st.aborted(ctx); err != nil {
+				yield(container.StatsResponse{}, err)
+				return
+			}
+			s := st.svc
+			s.mu.Lock()
+			ended, endErr := st.ended, st.endErr
+			var (
+				sample container.StatsResponse
+				have   bool
+			)
+			switch {
+			case !ended:
+				if q := s.stats[st.containerID]; len(q) > 0 {
+					sample, have = q[0], true
+					q[0] = container.StatsResponse{} // release references held by the backing array
+					if len(q) == 1 {
+						delete(s.stats, st.containerID)
+					} else {
+						s.stats[st.containerID] = q[1:]
+					}
+				}
+			case endErr == nil && st.tail != nil && len(st.tail.items) > 0:
+				sample, have = st.tail.items[0], true
+				st.tail.items[0] = container.StatsResponse{}
+				st.tail.items = st.tail.items[1:]
+			}
+			s.mu.Unlock()
+
+			switch {
+			case have:
+				if !yield(sample, nil) {
+					return
+				}
+				continue
+			case ended:
+				if endErr != nil {
+					yield(container.StatsResponse{}, endErr)
+				}
+				return
+			}
+			select {
+			case <-st.wake:
+			case <-ctx.Done():
+			case <-st.openCtx.Done():
+			case <-st.closed:
+			}
+		}
 	}
 }
 
@@ -1631,6 +1867,21 @@ func cloneImage(img image.Summary) image.Summary {
 	img.Labels = maps.Clone(img.Labels)
 	img.Manifests = slices.Clone(img.Manifests)
 	return img
+}
+
+func cloneStats(s container.StatsResponse) container.StatsResponse {
+	s.CPUStats.CPUUsage.PercpuUsage = slices.Clone(s.CPUStats.CPUUsage.PercpuUsage)
+	s.PreCPUStats.CPUUsage.PercpuUsage = slices.Clone(s.PreCPUStats.CPUUsage.PercpuUsage)
+	s.MemoryStats.Stats = maps.Clone(s.MemoryStats.Stats)
+	s.Networks = maps.Clone(s.Networks)
+	b := &s.BlkioStats
+	for _, p := range []*[]container.BlkioStatEntry{
+		&b.IoServiceBytesRecursive, &b.IoServicedRecursive, &b.IoQueuedRecursive, &b.IoServiceTimeRecursive,
+		&b.IoWaitTimeRecursive, &b.IoMergedRecursive, &b.IoTimeRecursive, &b.SectorsRecursive,
+	} {
+		*p = slices.Clone(*p)
+	}
+	return s
 }
 
 func cloneVolume(v volume.Volume) volume.Volume {
