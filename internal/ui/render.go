@@ -383,15 +383,38 @@ func (m *Model) helpView() string {
 	if crumbs := m.top().Crumbs(); len(crumbs) > 0 {
 		viewName = capitalize(components.Truncate(components.Clean(crumbs[len(crumbs)-1]), 30))
 	}
-	lines := section("Global", keys.Global.Bindings())
+	global := section("Global", keys.Global.Bindings())
+	var view []string
 	if vk := m.top().KeyHelp(); len(vk) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, section(viewName, vk)...)
+		view = section(viewName, vk)
 	}
-	// No blank line before the hint: the containers help must fit 80x24.
-	lines = append(lines, st.DialogHint.Render("? or esc to close"))
+	// No blank line before the hint, so the help stays as short as it can.
+	hint := st.DialogHint.Render("? or esc to close")
+
+	lines := global
+	if len(view) > 0 {
+		lines = slices.Concat(global, []string{""}, view)
+		// The sections are stacked when they fit the body (the content
+		// area and the rule above it) and side by side when only that
+		// fits, so a long view section is not cut at 80x24.
+		_, ch := m.contentSize()
+		if m.showRule() {
+			ch++
+		}
+		fw, fh := st.Dialog.GetHorizontalFrameSize(), st.Dialog.GetVerticalFrameSize()
+		left := lipgloss.NewStyle().PaddingRight(helpColumnGap).Render(strings.Join(global, "\n"))
+		side := lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Join(view, "\n"))
+		if len(lines)+1+fh > ch && lipgloss.Width(side)+fw <= m.width {
+			lines = strings.Split(side, "\n")
+		}
+	}
+	lines = append(lines, hint)
 	return st.Dialog.Render(strings.Join(lines, "\n"))
 }
+
+// helpColumnGap is the space between the help overlay's sections when they
+// are side by side.
+const helpColumnGap = 4
 
 // place draws dialog centred over content, which is width x height cells.
 // A dialog larger than the area is clipped.

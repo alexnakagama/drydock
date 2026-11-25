@@ -156,6 +156,8 @@ type ContainersMap struct {
 	Inspect   key.Binding
 	Shell     key.Binding
 	ToggleAll key.Binding
+	// Stats switches the PORTS column for the live CPU and MEM columns.
+	Stats key.Binding
 }
 
 // Containers is the containers-view keymap.
@@ -167,11 +169,12 @@ var Containers = ContainersMap{
 	Inspect:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "inspect")),
 	Shell:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "shell")),
 	ToggleAll: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/running")),
+	Stats:     key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "stats")),
 }
 
 // Bindings returns the containers-view bindings in display order.
 func (m ContainersMap) Bindings() []key.Binding {
-	return []key.Binding{m.StartStop, m.Restart, m.Delete, m.Logs, m.Inspect, m.Shell, m.ToggleAll}
+	return []key.Binding{m.StartStop, m.Restart, m.Delete, m.Logs, m.Inspect, m.Shell, m.ToggleAll, m.Stats}
 }
 
 // LogsMap holds the logs view's own keys (scrolling uses Pager).

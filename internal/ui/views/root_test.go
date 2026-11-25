@@ -2,6 +2,7 @@ package views
 
 import (
 	"image/color"
+	"slices"
 	"strings"
 	"testing"
 
@@ -87,7 +88,7 @@ func TestTabsSwitchAndHighlightWithRealViews(t *testing.T) {
 func TestFooterWideShowsEverything(t *testing.T) {
 	e := newEnv(t, mixedContainers(), 200, 12)
 	e.selectRow("web")
-	want := " l logs  s stop  x shell  i inspect  r restart  d delete  a all/running  / filter  : command  ? help  q quit"
+	want := " l logs  s stop  x shell  i inspect  r restart  d delete  a all/running  / filter  t stats  : command  ? help  q quit"
 	if got := e.footer(); got != want {
 		t.Errorf("footer\n  %q\nwant\n  %q", got, want)
 	}
@@ -165,7 +166,7 @@ func TestHelpFitsAt80x24(t *testing.T) {
 	if !strings.Contains(s, "? or esc to close") || !strings.Contains(s, "╰") {
 		t.Errorf("help overlay is clipped at 80x24:\n%s", s)
 	}
-	for _, want := range []string{"Global", "1-3/tab", "Containers", "l", "/ ", "filter"} {
+	for _, want := range []string{"Global", "1-3/tab", "Containers", "l", "/ ", "filter", "t          stats"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("help lacks %q:\n%s", want, s)
 		}
@@ -229,5 +230,97 @@ func TestBackgroundColorRestylesViewsBelowTop(t *testing.T) {
 	raw := e.m.View().Content
 	if !strings.Contains(raw, components.NewStyles(false).InputPrompt.Render("/")) {
 		t.Errorf("containers filter below the logs view not restyled:\n%q", raw)
+	}
+}
+
+// TestStatsSettingIsSessionWide drives the root model through every way a
+// containers view is shown, checking the stats setting carries over and
+// that stats are read only while a containers view with stats on is shown.
+func TestStatsSettingIsSessionWide(t *testing.T) {
+	f := imageSample() // web runs nginx; old (stopped) too
+	e := newEnv(t, f, 120, 14)
+
+	// Off at startup: the PORTS layout and no stream.
+	e.settle()
+	if got := e.headerTitles(); !slices.Contains(got, "PORTS") || slices.Contains(got, "CPU") {
+		t.Errorf("startup columns %q, want PORTS", got)
+	}
+	if n := len(f.CallsTo(dockerfake.MethodContainerStats)); n != 0 {
+		t.Errorf("%d stats streams opened at startup", n)
+	}
+
+	e.press("t")
+	e.waitStreams(1)
+
+	// Switching to images closes every stream.
+	e.press("2")
+	e.waitStreams(0)
+
+	// A drill-down from an image shows CPU and MEM and reads its container.
+	e.selectImage("nginx:1.27")
+	e.press("enter")
+	e.until("drill-down", func() bool { return strings.Contains(e.header(), "nginx:1.27 > containers") })
+	if got := e.headerTitles(); !slices.Contains(got, "CPU") || !slices.Contains(got, "MEM") {
+		t.Errorf("drill-down columns %q, want CPU and MEM", got)
+	}
+	e.waitStreams(1)
+	e.press("esc")
+	e.waitStreams(0)
+
+	// Switching back reopens them.
+	e.press("1")
+	e.waitStreams(1)
+	if got := e.headerTitles(); !slices.Contains(got, "CPU") {
+		t.Errorf("columns %q after switching back, want stats", got)
+	}
+
+	// So does :containers.
+	e.command("images")
+	e.waitStreams(0)
+	e.command("containers")
+	e.waitStreams(1)
+	if !strings.Contains(e.header(), "[stats]") {
+		t.Errorf("header %q after :containers, want the stats indicator", e.header())
+	}
+
+	// Logs pushed on top close the streams, and Esc reopens them.
+	e.selectRow("web")
+	e.press("l")
+	e.until("logs view", func() bool { return strings.Contains(e.header(), "web > logs") })
+	e.waitStreams(0)
+	e.press("esc")
+	e.waitStreams(1)
+
+	// Quitting closes them.
+	e.m.Close()
+	e.waitStreams(0)
+}
+
+// The help sections go side by side only when stacking them would not fit;
+// at any size the overlay stays within the screen width.
+func TestHelpLayoutFollowsSpace(t *testing.T) {
+	sameLine := func(s string) bool {
+		for _, l := range strings.Split(s, "\n") {
+			if strings.Contains(l, "Global") && strings.Contains(l, "Containers") {
+				return true
+			}
+		}
+		return false
+	}
+	for _, tc := range []struct {
+		w, h int
+		side bool
+	}{{80, 24, true}, {100, 40, false}, {40, 24, false}} {
+		e := newEnv(t, mixedContainers(), tc.w, tc.h)
+		e.press("?")
+		s := e.screen()
+		if got := sameLine(s); got != tc.side {
+			t.Errorf("%dx%d: side by side = %v, want %v:\n%s", tc.w, tc.h, got, tc.side, s)
+		}
+		for _, l := range e.lines() {
+			if n := len([]rune(l)); n > tc.w {
+				t.Errorf("%dx%d: line of %d cells", tc.w, tc.h, n)
+			}
+		}
 	}
 }

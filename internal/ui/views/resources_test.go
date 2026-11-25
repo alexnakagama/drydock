@@ -3,6 +3,10 @@ package views
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
+	"github.com/alexnakagama/drydock/internal/store"
 	"github.com/alexnakagama/drydock/internal/ui/keys"
 )
 
@@ -16,5 +20,28 @@ func TestResourcesFitTabKeys(t *testing.T) {
 		if r.Count == nil {
 			t.Errorf("resource %s has no Count", r.Name)
 		}
+	}
+}
+
+// A fresh Resources, as after a restart, starts with stats off, and its
+// views share one Prefs, so the setting is session-wide.
+func TestResourcesShareSessionPrefsStartingOff(t *testing.T) {
+	if (Prefs{}).Stats {
+		t.Fatal("the zero Prefs has stats on")
+	}
+	st := store.New(dockerfake.New(), func(tea.Msg) {})
+	rs := Resources(st)
+	cv := rs[0].New(store.Snapshot{}).(*containersView)
+	iv := rs[1].New(store.Snapshot{}).(*imagesView)
+	vv := rs[2].New(store.Snapshot{}).(*volumesView)
+	t.Cleanup(func() { cv.Close(); iv.Close(); vv.Close() })
+	if cv.prefs.Stats || cv.statsCols {
+		t.Error("a fresh containers view has stats on")
+	}
+	if cv.prefs != iv.prefs || cv.prefs != vv.prefs {
+		t.Error("the resource views do not share one Prefs")
+	}
+	if again := Resources(st)[0].New(store.Snapshot{}).(*containersView); again.prefs == cv.prefs {
+		t.Error("a new Resources reuses the previous session's Prefs")
 	}
 }
