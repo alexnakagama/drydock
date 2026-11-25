@@ -29,7 +29,7 @@
 
 ## 2. Store: stats math and sampler
 
-- [ ] 2.1 In a new `internal/store/stats.go`, add `ContainerStats{CPUPercent float64; HasCPU bool; MemUsage, MemLimit uint64; HasMem bool}` and the pure functions from design.md D6:
+- [x] 2.1 In a new `internal/store/stats.go`, add `ContainerStats{CPUPercent float64; HasCPU bool; MemUsage, MemLimit uint64; HasMem bool}` and the pure functions from design.md D6:
   - `cpuPercent(container.StatsResponse) (float64, bool)`
   - `memUsage(container.StatsResponse) (usage, limit uint64, ok bool)`
 
@@ -38,7 +38,7 @@
   - CPU, no value: a first stream record (`precpu_stats.system_cpu_usage` 0, with non-zero current counters); `sysDelta` 0; a negative `cpuDelta`.
   - CPU: `online_cpus` 0 falls back to `len(percpu_usage)`.
   - Memory: cgroup v2 `inactive_file` and cgroup v1 `total_inactive_file` are each subtracted, with 900 MiB raw usage and 400 MiB inactive giving 500 MiB. An inactive value at or above usage is not subtracted. The limit is passed through unchanged, including a host-sized limit. Zero usage with empty stats gives no value.
-- [ ] 2.2 Add `Store.SubscribeStats() *StatsSub` with `SetTargets(ids []string)`, `C() <-chan map[string]ContainerStats` and an idempotent `Close()`, as in design.md D2:
+- [x] 2.2 Add `Store.SubscribeStats() *StatsSub` with `SetTargets(ids []string)`, `C() <-chan map[string]ContainerStats` and an idempotent `Close()`, as in design.md D2:
   - The subscription's context derives from `Run`'s context.
   - One goroutine per target runs under `Store.Do`.
   - A 500 ms flush loop puts a copy of the map on the channel only when it changed, replacing any batch not yet taken.
@@ -56,7 +56,7 @@
   - `Close` brings `StatsStreams()` to 0, and later calls are no-ops.
   - Cancelling `Run`'s context also brings `StatsStreams()` to 0.
   - `go test -race ./internal/store/...` passes.
-- [ ] 2.3 Add `BenchmarkStatsSampler200` in `internal/store/stats_test.go`: 200 fake targets, each yielding a sample per flush interval, reporting allocations per flush. Verify it runs with `go test -run '^$' -bench StatsSampler ./internal/store/`, and record the result in the change's PR description (design.md Risks).
+- [x] 2.3 Add `BenchmarkStatsSampler200` in `internal/store/stats_test.go`: 200 fake targets, each yielding a sample per flush interval, reporting allocations per flush. Verify it runs with `go test -run '^$' -bench StatsSampler ./internal/store/`, and record the result in the change's PR description (design.md Risks).
 
 ## 3. Table: switching column sets
 

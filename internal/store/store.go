@@ -28,6 +28,11 @@ const (
 	defaultPingTimeout   = 5 * time.Second
 	defaultCallTimeout   = 10 * time.Second
 	defaultActionTimeout = 2 * time.Minute
+
+	defaultStatsFlush        = 500 * time.Millisecond
+	defaultStatsNotConnected = 500 * time.Millisecond
+	defaultStatsBackoffBase  = time.Second
+	defaultStatsBackoffMax   = 5 * time.Second
 )
 
 // config holds the store's timings. Tests shorten them.
@@ -50,6 +55,17 @@ type config struct {
 	callTimeout time.Duration
 	// actionTimeout bounds each command built with Action.
 	actionTimeout time.Duration
+
+	// statsFlush is how often a stats subscription hands its latest values
+	// to the subscriber, if they changed.
+	statsFlush time.Duration
+	// statsNotConnected is how long a stats stream that could not start
+	// because the store was not connected waits before trying again.
+	statsNotConnected time.Duration
+	// statsBackoffBase and statsBackoffMax shape the restart delays of a
+	// stats stream that ended for any other reason: base, 2*base, ...
+	// capped at max.
+	statsBackoffBase, statsBackoffMax time.Duration
 }
 
 func defaultConfig() config {
@@ -62,6 +78,49 @@ func defaultConfig() config {
 		pingTimeout:   defaultPingTimeout,
 		callTimeout:   defaultCallTimeout,
 		actionTimeout: defaultActionTimeout,
+
+		statsFlush:        defaultStatsFlush,
+		statsNotConnected: defaultStatsNotConnected,
+		statsBackoffBase:  defaultStatsBackoffBase,
+		statsBackoffMax:   defaultStatsBackoffMax,
+	}
+}
+
+// withStatsDefaults returns cfg with every unset (zero or negative) stats
+// timing replaced by its default, so that a config built without them (as
+// some tests do) cannot make a ticker panic or a restart loop spin.
+func (cfg config) withStatsDefaults() config {
+	def := defaultConfig()
+	if cfg.statsFlush <= 0 {
+		cfg.statsFlush = def.statsFlush
+	}
+	if cfg.statsNotConnected <= 0 {
+		cfg.statsNotConnected = def.statsNotConnected
+	}
+	if cfg.statsBackoffBase <= 0 {
+		cfg.statsBackoffBase = def.statsBackoffBase
+	}
+	if cfg.statsBackoffMax <= 0 {
+		cfg.statsBackoffMax = def.statsBackoffMax
+	}
+	return cfg
+}
+
+// Option configures a Store created with New.
+type Option func(*config)
+
+// WithStatsTimings sets the stats subscriptions' timings (see
+// Store.SubscribeStats): flush is how often changed values are handed to
+// the subscriber; notConnected is the restart delay of a stream that could
+// not start because the store was not connected; base and max shape the
+// doubling restart delay after any other failure. A zero or negative value
+// keeps that timing's default. It exists for tests, which shorten them.
+func WithStatsTimings(flush, notConnected, base, max time.Duration) Option {
+	return func(c *config) {
+		c.statsFlush = flush
+		c.statsNotConnected = notConnected
+		c.statsBackoffBase = base
+		c.statsBackoffMax = max
 	}
 }
 
@@ -109,6 +168,16 @@ type Store struct {
 	mu      sync.Mutex
 	baseCtx context.Context // Run's context, for actions; nil before Run
 
+	// life is cancelled once Run's context is; it is the parent of stats
+	// subscriptions made before Run.
+	life     context.Context
+	stopLife context.CancelFunc
+	// statsWG counts the goroutines of stats subscriptions; Run waits for
+	// them before returning. statsDone (guarded by mu) is set once Run has
+	// stopped accepting new ones.
+	statsWG   sync.WaitGroup
+	statsDone bool
+
 	// Owned by the Run goroutine.
 	snap Snapshot
 }
@@ -118,8 +187,14 @@ type Store struct {
 // running Run, in order; it may block, and a blocked send delays further
 // refreshes (events are not lost, they are coalesced). It must return once
 // the receiver has shut down.
-func New(svc docker.Service, send func(tea.Msg)) *Store {
-	return newStore(svc, send, defaultConfig())
+func New(svc docker.Service, send func(tea.Msg), opts ...Option) *Store {
+	cfg := defaultConfig()
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	return newStore(svc, send, cfg)
 }
 
 func newStore(svc docker.Service, send func(tea.Msg), cfg config) *Store {
@@ -129,7 +204,8 @@ func newStore(svc docker.Service, send func(tea.Msg), cfg config) *Store {
 	if send == nil {
 		panic("store: nil send function")
 	}
-	s := &Store{svc: svc, send: send, cfg: cfg}
+	s := &Store{svc: svc, send: send, cfg: cfg.withStatsDefaults()}
+	s.life, s.stopLife = context.WithCancel(context.Background())
 	s.state.Store(int32(StateConnecting))
 	return s
 }
@@ -231,7 +307,7 @@ func (s *Store) actionBase() context.Context {
 // Run loads the initial snapshot, keeps it current from the event stream,
 // and recovers from lost connections, until ctx is cancelled. It returns
 // nil once ctx is cancelled and every goroutine and stream it started has
-// ended. Run may be called only once.
+// ended, stats subscriptions' included. Run may be called only once.
 func (s *Store) Run(ctx context.Context) error {
 	if !s.started.CompareAndSwap(false, true) {
 		return errors.New("store: Run called more than once")
@@ -239,6 +315,19 @@ func (s *Store) Run(ctx context.Context) error {
 	s.mu.Lock()
 	s.baseCtx = ctx
 	s.mu.Unlock()
+	// Stats subscriptions made before Run derive from life.
+	stopLife := context.AfterFunc(ctx, s.stopLife)
+	defer func() {
+		stopLife()
+		s.stopLife()
+		// Every stats subscription derives from ctx or life, both now
+		// cancelled, so their goroutines are exiting. Refuse new ones and
+		// wait for the rest.
+		s.mu.Lock()
+		s.statsDone = true
+		s.mu.Unlock()
+		s.statsWG.Wait()
+	}()
 	// Refuse actions once Run has returned; the UI is shutting down, so no
 	// message is sent.
 	defer s.state.Store(int32(StateDisconnected))
