@@ -1241,3 +1241,16 @@ func TestPromptPlaceholderCleaned(t *testing.T) {
 		t.Errorf("placeholder rendered raw: %q", v)
 	}
 }
+
+func TestTableWhitespaceFilterShowsEmptyText(t *testing.T) {
+	const msg = "No containers."
+	tb := newTestTable()
+	tb.SetEmptyText(msg)
+	press(t, &tb, "/")
+	// While typing: Enter trims the filter, but the open input does not.
+	typeText(&tb, " ")
+	v := ansi.Strip(tb.View())
+	if !strings.Contains(v, msg) || strings.Contains(v, "No rows match") {
+		t.Errorf("a whitespace-only filter is not applied, want the empty-list message:\n%s", v)
+	}
+}

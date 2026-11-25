@@ -508,7 +508,9 @@ func (t *Table) View() string {
 // in body lines of the full table width.
 func (t *Table) emptyLines(body int) []string {
 	msg := t.emptyText
-	if t.filter != "" {
+	// A whitespace-only filter is not applied (see refilter), so the list
+	// is empty for the same reason as without one.
+	if strings.TrimSpace(t.filter) != "" {
 		msg = "No rows match the filter " + Quote(t.filter) + "."
 	}
 	msg = Styles.Empty.Render(Truncate(Clean(msg), t.width))
