@@ -79,9 +79,8 @@ type StyleSet struct {
 
 	// Table.
 	TableHeader     lipgloss.Style
-	TableSelected   lipgloss.Style
+	TableSelected   lipgloss.Style // the selected row's background bar
 	SelectionMarker lipgloss.Style // the selected row's gutter marker
-	SelectionBar    lipgloss.Style // the selected row's background bar
 	Empty           lipgloss.Style
 	RowGood         lipgloss.Style // unselected row with ToneGood
 	RowWarn         lipgloss.Style // unselected row with ToneWarn
@@ -135,9 +134,8 @@ func NewStyles(dark bool) StyleSet {
 		StatusProgress: lipgloss.NewStyle().Foreground(p.accent),
 
 		TableHeader:     lipgloss.NewStyle().Bold(true).Foreground(p.muted),
-		TableSelected:   lipgloss.NewStyle().Reverse(true),
+		TableSelected:   lipgloss.NewStyle().Bold(true).Background(p.selection),
 		SelectionMarker: lipgloss.NewStyle().Foreground(p.accent),
-		SelectionBar:    lipgloss.NewStyle().Bold(true).Background(p.selection),
 		Empty:           lipgloss.NewStyle().Foreground(p.muted).Italic(true),
 		RowGood:         lipgloss.NewStyle().Foreground(p.success),
 		RowWarn:         lipgloss.NewStyle().Foreground(p.warn),

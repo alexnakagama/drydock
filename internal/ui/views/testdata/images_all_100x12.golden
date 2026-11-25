@@ -1,12 +1,12 @@
  drydock > images [all]                                                                 ● connected 
  1 containers 3  2 images 6  3 volumes 0                                                        1/8 
-REPOSITORY:TAG                                     ID            SIZE       CREATED           IN USE
-alpine:3.20                                        cccccccccccc  7.8MB      2 months ago      0     
-app:1.0                                            bbbbbbbbbbbb  52.3MB     3 days ago        0     
-app:latest                                         bbbbbbbbbbbb  52.3MB     3 days ago        0     
-nginx:1.27                                         aaaaaaaaaaaa  187MB      2 weeks ago       2     
-nginx:latest                                       aaaaaaaaaaaa  187MB      2 weeks ago       2     
-<none>:<none>                                      dddddddddddd  300MB      2 days ago        0     
-<none>:<none>                                      eeeeeeeeeeee  150MB      5 days ago        0     
+  REPOSITORY:TAG                                   ID            SIZE       CREATED           IN USE
+▌ alpine:3.20                                      cccccccccccc  7.8MB      2 months ago      0     
+  app:1.0                                          bbbbbbbbbbbb  52.3MB     3 days ago        0     
+  app:latest                                       bbbbbbbbbbbb  52.3MB     3 days ago        0     
+  nginx:1.27                                       aaaaaaaaaaaa  187MB      2 weeks ago       2     
+  nginx:latest                                     aaaaaaaaaaaa  187MB      2 weeks ago       2     
+  <none>:<none>                                    dddddddddddd  300MB      2 days ago        0     
+  <none>:<none>                                    eeeeeeeeeeee  150MB      5 days ago        0     
                                                                                                     
  i inspect  p pull  d delete  / filter  a all/tagged  P prune dangling  : command  ? help  q quit   

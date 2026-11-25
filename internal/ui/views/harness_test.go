@@ -276,10 +276,22 @@ func (e *env) content() []string {
 	return out
 }
 
+// rowFields splits a table line into its space-separated words, without
+// the 2-cell gutter (the selection marker and a space, or two blanks). A
+// line without a gutter is not a table line and has no fields.
+func rowFields(l string) []string {
+	for _, gutter := range []string{"▌ ", "  "} {
+		if rest, ok := strings.CutPrefix(l, gutter); ok {
+			return strings.Fields(rest)
+		}
+	}
+	return nil
+}
+
 // rowOf returns the content line listing name as its first cell, or "".
 func (e *env) rowOf(name string) string {
 	for _, l := range e.content() {
-		if f := strings.Fields(l); len(f) > 0 && f[0] == name {
+		if f := rowFields(l); len(f) > 0 && f[0] == name {
 			return l
 		}
 	}

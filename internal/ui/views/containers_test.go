@@ -83,7 +83,7 @@ func TestContainersDefaultListsRunningSortedByName(t *testing.T) {
 
 	var names []string
 	for _, l := range e.content()[1:] {
-		if f := strings.Fields(l); len(f) > 0 {
+		if f := rowFields(l); len(f) > 0 {
 			names = append(names, f[0])
 		}
 	}
@@ -364,7 +364,7 @@ func TestFilteredContainersView(t *testing.T) {
 	}
 	var names []string
 	for _, l := range e.content()[1:] {
-		if fs := strings.Fields(l); len(fs) > 0 {
+		if fs := rowFields(l); len(fs) > 0 {
 			names = append(names, fs[0])
 		}
 	}

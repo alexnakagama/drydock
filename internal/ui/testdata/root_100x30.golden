@@ -1,9 +1,9 @@
  drydock > containers                                                                   ● connected 
  1 containers  2 images  3 volumes                                                              2/3 
-NAME          IMAGE                                                                     STATUS      
-db            postgres:16                                                               Up 2 hours  
-web           nginx:1.27                                                                Up 5 minutes
-worker        alpine                                                                    Exited (0)  
+  NAME          IMAGE                                                                   STATUS      
+  db            postgres:16                                                             Up 2 hours  
+▌ web           nginx:1.27                                                              Up 5 minutes
+  worker        alpine                                                                  Exited (0)  
                                                                                                     
                                                                                                     
                                                                                                     

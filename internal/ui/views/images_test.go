@@ -87,7 +87,7 @@ func (e *env) selectImage(label string) {
 func (e *env) labels() []string {
 	var out []string
 	for _, l := range e.content()[1:] {
-		if f := strings.Fields(l); len(f) > 0 && strings.Contains(f[0], ":") {
+		if f := rowFields(l); len(f) > 0 && strings.Contains(f[0], ":") {
 			out = append(out, f[0])
 		}
 	}
@@ -110,7 +110,7 @@ func TestImagesOneRowPerTag(t *testing.T) {
 	}
 	// Both tags of one image show the same short ID and the same users.
 	for _, tag := range []string{"nginx:1.27", "nginx:latest"} {
-		f := strings.Fields(e.rowOf(tag))
+		f := rowFields(e.rowOf(tag))
 		if len(f) < 2 || f[1] != strings.Repeat("a", 12) {
 			t.Errorf("%s row %q, want ID %s", tag, e.rowOf(tag), strings.Repeat("a", 12))
 		}
@@ -119,7 +119,7 @@ func TestImagesOneRowPerTag(t *testing.T) {
 			t.Errorf("%s row %q, want IN USE 2", tag, e.rowOf(tag))
 		}
 	}
-	if f := strings.Fields(e.rowOf("alpine:3.20")); f[len(f)-1] != "0" {
+	if f := rowFields(e.rowOf("alpine:3.20")); f[len(f)-1] != "0" {
 		t.Errorf("alpine row %q, want IN USE 0", e.rowOf("alpine:3.20"))
 	}
 	row := e.rowOf("nginx:1.27")
