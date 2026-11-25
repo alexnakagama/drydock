@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/volume"
@@ -14,6 +15,7 @@ import (
 	"github.com/alexnakagama/drydock/internal/docker"
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
 	"github.com/alexnakagama/drydock/internal/store"
+	"github.com/alexnakagama/drydock/internal/ui/components"
 )
 
 func pub(ip string, public, private uint16, proto string) container.PortSummary {
@@ -133,6 +135,104 @@ func TestContainersEmptyStates(t *testing.T) {
 	e = newEnv(t, f, 100, 8)
 	if !strings.Contains(e.screen(), "No running containers (1 stopped; press a to show all).") {
 		t.Errorf("only stopped containers:\n%s", e.screen())
+	}
+}
+
+// allContainerStates lists every state the engine reports, plus an
+// unknown one.
+var allContainerStates = []container.ContainerState{
+	container.StateCreated, container.StateRunning, container.StatePaused, container.StateRestarting,
+	container.StateRemoving, container.StateExited, container.StateDead, "", "bogus",
+}
+
+func TestContainerGlyph(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		state container.ContainerState
+		want  string
+	}{
+		{container.StateRunning, "●"},
+		{container.StatePaused, "◐"},
+		{container.StateRestarting, "◐"},
+		{container.StateExited, "○"},
+		{container.StateCreated, "○"},
+		{container.StateDead, "○"},
+		{container.StateRemoving, " "},
+		{"", " "},
+		{"bogus", " "},
+	}
+	for _, tt := range tests {
+		if got := containerGlyph(tt.state); got != tt.want {
+			t.Errorf("containerGlyph(%q) = %q, want %q", tt.state, got, tt.want)
+		}
+	}
+}
+
+func TestContainerGlyphAgreesWithTone(t *testing.T) {
+	t.Parallel()
+	byTone := map[components.Tone]string{
+		components.ToneGood:    "●",
+		components.ToneWarn:    "◐",
+		components.ToneDim:     "○",
+		components.ToneDefault: " ",
+	}
+	for _, s := range allContainerStates {
+		tone := containerTone(s)
+		if got, want := containerGlyph(s), byTone[tone]; got != want {
+			t.Errorf("state %q: glyph %q, but tone %d implies %q", s, got, tone, want)
+		}
+		if w := ansi.StringWidth(containerGlyph(s)); w != 1 {
+			t.Errorf("state %q: glyph is %d cells wide, want 1", s, w)
+		}
+	}
+}
+
+// statusCell returns the STATUS cell of the content line listing name,
+// starting at the STATUS header's column.
+func (e *env) statusCell(name string) string {
+	e.t.Helper()
+	content := e.content()
+	if len(content) == 0 {
+		e.t.Fatalf("no content; screen:\n%s", e.screen())
+	}
+	col := strings.Index(content[0], "STATUS") // the header row is ASCII
+	if col < 0 {
+		e.t.Fatalf("no STATUS header in %q", content[0])
+	}
+	row := []rune(e.rowOf(name))
+	if len(row) <= col {
+		e.t.Fatalf("row %s = %q, too short for the STATUS column at %d", name, string(row), col)
+	}
+	return string(row[col:])
+}
+
+func TestContainersStatusGlyphs(t *testing.T) {
+	f, _ := sample()
+	f.AddContainer(ctr(cid(4), "gone", "alpine", container.StateRemoving, "Removal In Progress"))
+	e := newEnv(t, f, 120, 14)
+	e.press("a")
+	for name, want := range map[string]string{
+		"web":    "● Up 5 minutes",
+		"db":     "● Up 2 hours",
+		"frozen": "◐ Up 1 hour (Paused)",
+		"old":    "○ Exited (0) 3 days ago",
+		"gone":   "  Removal In Progress",
+	} {
+		if got := e.statusCell(name); !strings.HasPrefix(got, want) {
+			t.Errorf("%s STATUS cell = %q, want it to begin with %q", name, got, want)
+		}
+	}
+}
+
+func TestContainersGlyphOnSelectedRow(t *testing.T) {
+	f, _ := sample()
+	e := newEnv(t, f, 100, 12)
+	e.selectRow("web")
+	if row := e.rowOf("web"); !strings.HasPrefix(row, "▌") {
+		t.Fatalf("web row = %q, want it selected", row)
+	}
+	if got := e.statusCell("web"); !strings.HasPrefix(got, "● Up 5 minutes") {
+		t.Errorf("selected web STATUS cell = %q, want it to begin with the running glyph", got)
 	}
 }
 
