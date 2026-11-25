@@ -4,7 +4,6 @@ package views
 
 import (
 	"context"
-	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -49,18 +48,13 @@ func TestIntegrationLogs(t *testing.T) {
 	script := `for i in 1 2 3; do echo out-$i; echo err-$i >&2; done; printf 'no-newline'; sleep 300`
 	for _, tty := range []bool{false, true} {
 		name := "no tty"
-		args := []string{"run", "-d", "--rm", "--label", "drydock-it=1"}
+		var args []string
 		if tty {
 			name = "tty"
 			args = append(args, "-t")
 		}
 		t.Run(name, func(t *testing.T) {
-			out, err := exec.Command("docker", append(args, "alpine:latest", "sh", "-c", script)...).CombinedOutput()
-			if err != nil {
-				t.Fatalf("docker run: %v: %s", err, out)
-			}
-			id := strings.TrimSpace(string(out))
-			t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
+			id := dockerRun(t, append(args, "alpine:latest", "sh", "-c", script)...)
 
 			cfg := defaultLogsConfig()
 			cfg.batchInterval = 20 * time.Millisecond

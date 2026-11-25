@@ -3,6 +3,7 @@
 package views
 
 import (
+	"bytes"
 	"context"
 	"os/exec"
 	"strings"
@@ -19,14 +20,29 @@ import (
 
 func runTestContainer(t *testing.T, img string) string {
 	t.Helper()
+	return dockerRun(t, img, "sleep", "300")
+}
+
+// dockerRun runs `docker run -d --rm --label drydock-it=1 args...`, removes
+// the container when the test ends, and returns its ID. Only stdout carries
+// the ID: when the image has to be pulled first, docker reports the pull on
+// stderr, which is kept for the failure message.
+func dockerRun(t *testing.T, args ...string) string {
+	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker CLI not found")
 	}
-	out, err := exec.Command("docker", "run", "-d", "--rm", "--label", "drydock-it=1", img, "sleep", "300").CombinedOutput()
+	cmd := exec.Command("docker", append([]string{"run", "-d", "--rm", "--label", "drydock-it=1"}, args...)...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("docker run %s: %v: %s", img, err, out)
+		t.Fatalf("docker run %s: %v: %s", strings.Join(args, " "), err, stderr.Bytes())
 	}
 	id := strings.TrimSpace(string(out))
+	if err := docker.ValidateContainerID(id); err != nil {
+		t.Fatalf("docker run printed %q, want a container ID: %v", out, err)
+	}
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
 	return id
 }

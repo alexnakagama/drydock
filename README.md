@@ -167,6 +167,21 @@ its filter and selection are kept; `:name` always reopens it fresh. The
 switching keys are ignored while typing in a filter, a prompt or the command
 bar.
 
+In a containers view, `t` replaces the PORTS column with live CPU and MEM
+columns, and pressing it again brings PORTS back. Stats are off when drydock
+starts, and the setting then applies to every containers view, drill-downs
+included, until you quit; it is not saved. The values match `docker stats`:
+CPU is summed across cores, so a container using two full cores shows
+`200.0%`, and MEM is usage and limit with the inactive page cache excluded,
+for example `512.3MiB / 2GiB`. Values refresh about once a second. A `-`
+means there is no value to show: the container is not running (paused
+containers included), its first sample has not arrived yet, the engine does
+not report that value, or drydock is disconnected from the engine. Stats are
+read from the engine only while a containers view with stats on is on
+screen, and only for the running containers of that view, including those a
+`/` filter hides. On narrow terminals, the `t` hint is the first footer
+hint dropped; `?` still lists it.
+
 Global keys and list navigation:
 
 | Key               | Action                                                        |
@@ -184,7 +199,7 @@ Actions in the resource views. Delete and prune ask for confirmation first:
 
 | View       | Keys                                                               |
 |------------|--------------------------------------------------------------------|
-| Containers | `s` start/stop, `r` restart, `d` delete, `l` logs, `i` inspect, `x` shell, `a` all/running |
+| Containers | `s` start/stop, `r` restart, `d` delete, `l` logs, `i` inspect, `x` shell, `a` all/running, `t` stats/ports |
 | Images     | `Enter` containers using it, `p` pull, `d` delete, `i` inspect, `P` prune dangling, `a` all/tagged |
 | Volumes    | `Enter` containers using it, `c` create, `d` delete, `i` inspect, `P` prune unused |
 | Logs       | `G` follow, `/` search, `r` reopen an ended stream                 |
