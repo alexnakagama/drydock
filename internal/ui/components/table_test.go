@@ -1,6 +1,8 @@
 package components
 
 import (
+	"math/rand/v2"
+	"slices"
 	"strings"
 	"testing"
 
@@ -204,7 +206,7 @@ func TestTableScrollsToKeepSelectionVisible(t *testing.T) {
 	if len(lines) != 10 {
 		t.Fatalf("view has %d lines, want 10", len(lines))
 	}
-	if !strings.HasPrefix(lines[9], "l ") {
+	if !strings.HasPrefix(lines[9], selectionMarker+" l ") {
 		t.Errorf("last row not visible after G; last line %q", lines[9])
 	}
 }
@@ -358,14 +360,17 @@ func TestTableRowTones(t *testing.T) {
 	press(t, &tb, "j") // select b, so a, c and d are unselected
 	ws := tb.widths()
 	plain := func(i int) string { return tb.renderLine(rows[i].Cells, ws) }
+	selected := func(i int) string {
+		return Styles.SelectionMarker.Render(selectionMarker) + Styles.TableSelected.Render(" "+plain(i))
+	}
 	lines := strings.Split(tb.View(), "\n")
 
 	want := []string{
-		Styles.RowGood.Render(plain(0)),
-		Styles.TableSelected.Render(plain(1)),
-		Styles.RowDim.Render(plain(2)),
-		plain(3),
-		plain(4),
+		"  " + Styles.RowGood.Render(plain(0)),
+		selected(1),
+		"  " + Styles.RowDim.Render(plain(2)),
+		"  " + plain(3),
+		"  " + plain(4),
 	}
 	for i, w := range want {
 		if got := lines[i+1]; got != w {
@@ -380,10 +385,13 @@ func TestTableRowTones(t *testing.T) {
 	// A dimmed row, once selected, is the plain selection of the untoned line.
 	press(t, &tb, "j") // select c
 	lines = strings.Split(tb.View(), "\n")
-	if got, w := lines[3], Styles.TableSelected.Render(plain(2)); got != w {
+	if got, w := lines[3], selected(2); got != w {
 		t.Errorf("selected dimmed row rendered %q, want %q", got, w)
 	}
-	if got, w := lines[2], Styles.RowWarn.Render(plain(1)); got != w {
+	if strings.Contains(lines[3], Styles.RowDim.Render(plain(2))) {
+		t.Error("selected dimmed row carries its tone style")
+	}
+	if got, w := lines[2], "  "+Styles.RowWarn.Render(plain(1)); got != w {
 		t.Errorf("unselected warn row rendered %q, want %q", got, w)
 	}
 	for i, l := range lines {
@@ -458,4 +466,388 @@ func TestTablePosition(t *testing.T) {
 	if got, want := get(&unfiltered), (pos{12, 12, 12, false}); got != want {
 		t.Errorf("after G: Position() = %+v, want %+v", got, want)
 	}
+}
+
+// colStarts returns the cell offset at which each column starts in a
+// rendered line of tb, gutter included.
+func colStarts(tb *Table) []int {
+	var starts []int
+	x := gutterWidth
+	for _, w := range tb.widths() {
+		starts = append(starts, x)
+		x += w + columnGap
+	}
+	return starts
+}
+
+func TestTableWidthsFitContent(t *testing.T) {
+	// Like the containers view: NAME, IMAGE and PORTS grow, STATUS doesn't.
+	cols := []Column{
+		{Title: "NAME", Width: 20, Flex: true, Filter: true},
+		{Title: "IMAGE", Width: 24, Flex: true, Filter: true},
+		{Title: "STATUS", Width: 22},
+		{Title: "PORTS", Width: 24, Flex: true},
+	}
+	newTable := func(rows ...Row) Table {
+		tb := NewTable(cols)
+		tb.SetSize(120, 10)
+		tb.SetRows(rows)
+		return tb
+	}
+	r := func(key, name, image string) Row {
+		return Row{Key: key, Cells: []string{name, image, "Up 2 hours", "80/tcp"}}
+	}
+	sum := func(ws []int) int {
+		n := columnGap * (len(ws) - 1)
+		for _, w := range ws {
+			n += w
+		}
+		return n
+	}
+
+	t.Run("short names keep their minimum", func(t *testing.T) {
+		tb := newTable(r("1", "db", "postgres"), r("2", "web", "nginx"), r("3", "worker", "busybox"))
+		ws := tb.widths()
+		if ws[0] != 20 || ws[1] != 24 || ws[2] != 22 {
+			t.Errorf("widths %v: NAME, IMAGE and STATUS should stay at their minimums 20, 24, 22", ws)
+		}
+		if want := 120 - gutterWidth - (20 + 24 + 22 + 3*columnGap); ws[3] != want {
+			t.Errorf("PORTS width %d, want the remainder %d", ws[3], want)
+		}
+		if got := sum(ws); got != 120-gutterWidth {
+			t.Errorf("columns take %d cells, want %d", got, 120-gutterWidth)
+		}
+	})
+
+	long := strings.Repeat("i", 40)
+	t.Run("long value widens its column", func(t *testing.T) {
+		tb := newTable(r("1", "web", "nginx"), r("2", "app", long))
+		ws := tb.widths()
+		if ws[1] != 40 || ws[0] != 20 {
+			t.Errorf("widths %v: want NAME 20 and IMAGE 40", ws)
+		}
+		lines := strings.Split(ansi.Strip(tb.View()), "\n")
+		if !strings.Contains(lines[2], long) {
+			t.Errorf("40-cell image truncated: %q", lines[2])
+		}
+		if strings.Contains(lines[2], "…") {
+			t.Errorf("line truncated with room to spare: %q", lines[2])
+		}
+	})
+
+	t.Run("filtering re-measures", func(t *testing.T) {
+		tb := newTable(r("1", "web", "nginx"), r("2", "app", long))
+		press(t, &tb, "/")
+		typeText(&tb, "web")
+		if ws := tb.widths(); ws[1] != 24 {
+			t.Errorf("IMAGE width %d after the long row was filtered out, want 24", ws[1])
+		}
+		press(t, &tb, "esc")
+		if ws := tb.widths(); ws[1] != 40 {
+			t.Errorf("IMAGE width %d after the filter was cleared, want 40", ws[1])
+		}
+		tb.SetRows([]Row{r("1", "web", "nginx")})
+		if ws := tb.widths(); ws[1] != 24 {
+			t.Errorf("IMAGE width %d after the long row was removed, want 24", ws[1])
+		}
+	})
+
+	t.Run("growth is shared when not everything fits", func(t *testing.T) {
+		tb := newTable(r("1", strings.Repeat("n", 60), strings.Repeat("i", 60)))
+		ws := tb.widths()
+		// 22 spare cells, and both NAME and IMAGE want more than half of
+		// them: each grows by 11, and PORTS keeps its minimum.
+		if ws[0] != 31 || ws[1] != 35 || ws[3] != 24 {
+			t.Errorf("widths %v, want NAME 31, IMAGE 35, PORTS 24", ws)
+		}
+		if got := sum(ws); got != 120-gutterWidth {
+			t.Errorf("columns take %d cells, want %d", got, 120-gutterWidth)
+		}
+	})
+
+	t.Run("small need is met before sharing", func(t *testing.T) {
+		tb := newTable(r("1", strings.Repeat("n", 23), strings.Repeat("i", 80)))
+		ws := tb.widths()
+		// 22 spare cells: NAME needs 3 and gets them, IMAGE the other 19.
+		if ws[0] != 23 || ws[1] != 24+19 {
+			t.Errorf("widths %v, want NAME 23 and IMAGE the rest of the spare width", ws)
+		}
+	})
+
+	t.Run("titles count", func(t *testing.T) {
+		tb := NewTable([]Column{{Title: "A-LONG-TITLE", Width: 4, Flex: true}, {Title: "B", Width: 4, Flex: true}})
+		tb.SetSize(40, 5)
+		tb.SetRows([]Row{{Key: "1", Cells: []string{"x", "y"}}})
+		if ws := tb.widths(); ws[0] != 12 || ws[1] != 40-gutterWidth-12-columnGap {
+			t.Errorf("widths %v, want the first column as wide as its title", ws)
+		}
+	})
+
+	t.Run("cut when the minimums do not fit", func(t *testing.T) {
+		tb := newTable(r("1", "web", long))
+		tb.SetSize(50, 5)
+		ws := tb.widths()
+		if ws[0] != 20 || ws[1] != 24 || ws[2] != 22 || ws[3] != 24 {
+			t.Errorf("widths %v, want the minimums", ws)
+		}
+		for i, l := range strings.Split(tb.View(), "\n") {
+			if w := ansi.StringWidth(l); w != 50 {
+				t.Errorf("line %d is %d cells wide, want 50", i, w)
+			}
+		}
+	})
+}
+
+func TestTableSelectionGutter(t *testing.T) {
+	tb := newTestTable(row("a", "db", "postgres", "up"), row("b", "web", "nginx", "up"), row("c", "worker", "busybox", "up"))
+	press(t, &tb, "j") // web
+	check := func(want int) {
+		t.Helper()
+		lines := strings.Split(ansi.Strip(tb.View()), "\n")
+		for i, l := range lines {
+			marked := strings.HasPrefix(l, selectionMarker+" ")
+			if i == want+1 {
+				if !marked {
+					t.Errorf("selected line %d %q does not start with the marker", i, l)
+				}
+			} else if !strings.HasPrefix(l, "  ") {
+				t.Errorf("line %d %q does not start with a blank gutter", i, l)
+			}
+			if w := ansi.StringWidth(l); w != 60 {
+				t.Errorf("line %d is %d cells wide, want 60", i, w)
+			}
+		}
+		// Columns line up with the header, selected row included.
+		header := lines[0]
+		for c, x := range colStarts(&tb) {
+			title := tb.cols[c].Title
+			if got := ansi.Cut(header, x, x+len(title)); got != title {
+				t.Errorf("header column %d at %d reads %q, want %q", c, x, got, title)
+			}
+		}
+		x := colStarts(&tb)[1]
+		for i, img := range []string{"postgres", "nginx", "busybox"} {
+			if got := ansi.Cut(lines[i+1], x, x+len(img)); got != img {
+				t.Errorf("row %d IMAGE at %d reads %q, want %q", i, x, got, img)
+			}
+		}
+	}
+	check(1)
+	press(t, &tb, "j")
+	check(2)
+
+	if v := tb.View(); strings.Contains(v, "\x1b[7m") {
+		t.Error("the selection still uses reverse video")
+	}
+}
+
+func TestTableGutterNarrowerThanItself(t *testing.T) {
+	tb := newTestTable(row("a", "db", "postgres", "up"))
+	tb.SetSize(1, 3)
+	for i, l := range strings.Split(tb.View(), "\n") {
+		if w := ansi.StringWidth(l); w != 1 {
+			t.Errorf("line %d is %d cells wide, want 1", i, w)
+		}
+	}
+}
+
+// messageAt returns the row and column, in cells, at which msg starts in
+// the stripped view v, or -1, -1 if it is not shown.
+func messageAt(v, msg string) (row, col int) {
+	for i, l := range strings.Split(ansi.Strip(v), "\n") {
+		if j := strings.Index(l, msg); j >= 0 {
+			return i, ansi.StringWidth(l[:j])
+		}
+	}
+	return -1, -1
+}
+
+func TestTableEmptyMessageCentered(t *testing.T) {
+	const msg = "No running containers (2 stopped; press a to show all)."
+	tb := newTestTable()
+	tb.SetSize(100, 9) // header + 8 body lines
+	tb.SetEmptyText(msg)
+	v := tb.View()
+	r, c := messageAt(v, msg)
+	// 8 body lines, 1 for the message: 3 above it, 4 below. 45 spare cells:
+	// 22 to the left, 23 to the right.
+	if r != 1+3 || c != (100-len(msg))/2 {
+		t.Errorf("message at row %d column %d, want row 4 column %d:\n%s", r, c, (100-len(msg))/2, ansi.Strip(v))
+	}
+	lines := strings.Split(v, "\n")
+	if len(lines) != 9 {
+		t.Fatalf("view has %d lines, want 9", len(lines))
+	}
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w != 100 {
+			t.Errorf("line %d is %d cells wide, want 100", i, w)
+		}
+	}
+}
+
+func TestTableNoMatchMessageCentered(t *testing.T) {
+	tb := newTestTable(row("1", "web", "nginx", ""))
+	press(t, &tb, "/")
+	typeText(&tb, "zzz")
+	const msg = `No rows match the filter "zzz".`
+	// While typing, the body is the 8 lines between the header and the
+	// input: 3 above the message, 4 below. Of the 29 spare cells, 14 go to
+	// the left.
+	if r, c := messageAt(tb.View(), msg); r != 1+3 || c != (60-len(msg))/2 {
+		t.Errorf("while typing: message at row %d column %d, want row 4 column %d", r, c, (60-len(msg))/2)
+	}
+	press(t, &tb, "enter")
+	// With the input closed the body is 9 lines: 4 above, 4 below.
+	v := tb.View()
+	if r, c := messageAt(v, msg); r != 1+4 || c != (60-len(msg))/2 {
+		t.Errorf("message at row %d column %d, want row 5 column %d:\n%s", r, c, (60-len(msg))/2, ansi.Strip(v))
+	}
+}
+
+func TestTableEmptyMessageTruncated(t *testing.T) {
+	tb := newTestTable()
+	tb.SetSize(20, 4)
+	tb.SetEmptyText(strings.Repeat("m", 50))
+	lines := strings.Split(tb.View(), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("view has %d lines, want 4", len(lines))
+	}
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w != 20 {
+			t.Errorf("line %d is %d cells wide, want 20", i, w)
+		}
+	}
+	if !strings.Contains(ansi.Strip(tb.View()), "…") {
+		t.Error("long empty message not truncated with an ellipsis")
+	}
+}
+
+// naiveGrow is the definition growToNatural must match: hand out one cell
+// at a time, left to right, to the flex columns still below their natural
+// width, and return the cells left over.
+func naiveGrow(ws, flex, natural []int, extra int) int {
+	for extra > 0 {
+		gave := false
+		for _, i := range flex {
+			if extra > 0 && ws[i] < natural[i] {
+				ws[i]++
+				extra--
+				gave = true
+			}
+		}
+		if !gave {
+			break
+		}
+	}
+	return extra
+}
+
+func TestGrowToNaturalMatchesOneCellAtATime(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	for n := range 5000 {
+		cols := 1 + rng.IntN(6)
+		ws := make([]int, cols)
+		natural := make([]int, cols)
+		var flex []int
+		for i := range cols {
+			ws[i] = 1 + rng.IntN(10)
+			natural[i] = ws[i] + rng.IntN(6) // equal needs are common
+			if rng.IntN(3) > 0 {
+				flex = append(flex, i)
+			}
+		}
+		extra := rng.IntN(30)
+		want := slices.Clone(ws)
+		wantLeft := naiveGrow(want, flex, natural, extra)
+
+		tb := Table{natural: natural}
+		got := slices.Clone(ws)
+		gotLeft := tb.growToNatural(got, slices.Clone(flex), extra)
+		if !slices.Equal(got, want) || gotLeft != wantLeft {
+			t.Fatalf("case %d: ws %v natural %v flex %v extra %d: got %v left %d, want %v left %d",
+				n, ws, natural, flex, extra, got, gotLeft, want, wantLeft)
+		}
+	}
+}
+
+func TestTableExactSizeAtTinySizes(t *testing.T) {
+	populated := func() Table { return newTestTable(row("a", "db", "postgres", "up"), row("b", "web", "nginx", "up")) }
+	empty := func() Table { return newTestTable() }
+	noMatch := func(submit bool) func() Table {
+		return func() Table {
+			tb := newTestTable(row("a", "db", "postgres", "up"))
+			press(t, &tb, "/")
+			typeText(&tb, "zzz")
+			if submit {
+				press(t, &tb, "enter")
+			}
+			return tb
+		}
+	}
+	cases := map[string]func() Table{
+		"populated":             populated,
+		"empty":                 empty,
+		"no match while typing": noMatch(false),
+		"no match":              noMatch(true),
+	}
+	for name, mk := range cases {
+		for w := range 5 {
+			for h := range 5 {
+				tb := mk()
+				tb.SetSize(w, h)
+				v := tb.View()
+				if w == 0 || h == 0 {
+					if v != "" {
+						t.Errorf("%s %dx%d: view %q, want empty", name, w, h, v)
+					}
+					continue
+				}
+				lines := strings.Split(v, "\n")
+				if len(lines) != h {
+					t.Errorf("%s %dx%d: %d lines, want %d", name, w, h, len(lines), h)
+				}
+				for i, l := range lines {
+					if lw := ansi.StringWidth(l); lw != w {
+						t.Errorf("%s %dx%d: line %d is %d cells wide: %q", name, w, h, i, lw, ansi.Strip(l))
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestTableEmptyMessagesSanitized(t *testing.T) {
+	const hostile = "evil\x1b]0;pwned\x07\u202etxt\x1b[2J"
+	check := func(name string, tb *Table) {
+		t.Helper()
+		v := tb.View()
+		stripped := ansi.Strip(v)
+		for _, bad := range []string{"\x1b", "\u202e", "\x07"} {
+			if strings.Contains(stripped, bad) {
+				t.Errorf("%s: %q reached the output: %q", name, bad, stripped)
+			}
+		}
+		if strings.Contains(v, "\x1b[2J") || strings.Contains(v, "\x1b]0;") {
+			t.Errorf("%s: control sequence from untrusted text reached the output", name)
+		}
+		if !strings.Contains(stripped, "evil") {
+			t.Errorf("%s: message not shown: %q", name, stripped)
+		}
+		for i, l := range strings.Split(v, "\n") {
+			if w := ansi.StringWidth(l); w != 60 {
+				t.Errorf("%s: line %d is %d cells wide, want 60", name, i, w)
+			}
+		}
+	}
+
+	tb := newTestTable()
+	tb.SetEmptyText(hostile)
+	check("empty text", &tb)
+
+	tb = newTestTable(row("a", "db", "postgres", "up"))
+	press(t, &tb, "/")
+	tb.Update(tea.PasteMsg{Content: hostile})
+	check("no-match while typing", &tb)
+	press(t, &tb, "enter")
+	check("no-match", &tb)
 }

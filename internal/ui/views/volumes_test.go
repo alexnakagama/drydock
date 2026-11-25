@@ -78,7 +78,7 @@ func (e *env) selectVolume(name string) {
 func (e *env) volumeNames() []string {
 	var out []string
 	for _, l := range e.content()[1:] {
-		if f := strings.Fields(l); len(f) == 4 {
+		if f := rowFields(l); len(f) == 4 {
 			out = append(out, f[0])
 		}
 	}
@@ -93,8 +93,10 @@ func shownAs(name string, width int) string {
 	return name[:width-1] + "…"
 }
 
-// anonShown is anonVolume as the NAME column shows it at width 100.
-var anonShown = shownAs(anonVolume, 34)
+// anonShown is anonVolume as the NAME column shows it at width 100: the 98
+// cells right of the gutter leave 6 spare cells over the minimum widths,
+// and NAME and MOUNTPOINT both want more than half of them, so each gets 3.
+var anonShown = shownAs(anonVolume, 33)
 
 func volumeRemoveCalls(f *dockerfake.Service) []dockerfake.Call {
 	return f.CallsTo(dockerfake.MethodVolumeRemove)
@@ -129,7 +131,7 @@ func TestVolumesList(t *testing.T) {
 		t.Fatalf("rows %v, want %v", got, want)
 	}
 	for name, uses := range map[string]string{"pgdata": "1", "shared": "2", "tmp1": "0"} {
-		f := strings.Fields(e.rowOf(name))
+		f := rowFields(e.rowOf(name))
 		if len(f) != 4 || f[1] != "local" || f[2] != "/var/lib/docker/volumes/"+name+"/_data" || f[3] != uses {
 			t.Errorf("%s row %q, want local driver, its mountpoint and IN USE %s", name, e.rowOf(name), uses)
 		}
@@ -139,7 +141,7 @@ func TestVolumesList(t *testing.T) {
 	}
 	// The anonymous volume is listed, and acted on, by its generated name.
 	e.selectVolume(anonVolume)
-	if f := strings.Fields(e.rowOf(anonShown)); len(f) != 4 || f[1] != "local" || f[3] != "0" {
+	if f := rowFields(e.rowOf(anonShown)); len(f) != 4 || f[1] != "local" || f[3] != "0" {
 		t.Errorf("anonymous volume row %q", e.rowOf(anonShown))
 	}
 }

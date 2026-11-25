@@ -7,12 +7,22 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/alexnakagama/drydock/internal/ui/keys"
 )
 
-// columnGap is the number of spaces between table columns.
-const columnGap = 2
+const (
+	// columnGap is the number of spaces between table columns.
+	columnGap = 2
+	// gutterWidth is the number of cells left of the first column, on every
+	// line, where the selected row shows its marker.
+	gutterWidth = 2
+	// selectionMarker marks the selected row in the gutter, so the
+	// selection is visible without color.
+	selectionMarker = "▌"
+)
 
 // Column describes a table column.
 type Column struct {
@@ -20,7 +30,9 @@ type Column struct {
 	// Width is the column's width in cells. For a Flex column it is the
 	// minimum width.
 	Width int
-	// Flex columns share the width left over by the fixed columns.
+	// Flex columns grow from Width toward their natural width: the widest
+	// of their title and the cells of the listed rows. Width left over once
+	// every flex column fits goes to the last flex column.
 	Flex bool
 	// Filter marks the column as searched by the list filter.
 	Filter bool
@@ -60,6 +72,8 @@ type Table struct {
 	all       []Row
 	visible   []Row
 	lowered   [][]string // lower-cased filter cells of all, by row
+	cellWidth [][]int    // rendered width of each cleaned cell of all, by row
+	natural   []int      // natural width of each column over visible
 	cursor    int
 	offset    int
 	width     int
@@ -100,10 +114,15 @@ func (t *Table) SetSize(width, height int) {
 func (t *Table) SetRows(rows []Row) {
 	t.all = slices.Clone(rows)
 	t.lowered = make([][]string, len(rows))
+	t.cellWidth = make([][]int, len(rows))
 	for i, r := range rows {
-		for c, col := range t.cols {
-			if col.Filter && c < len(r.Cells) {
-				t.lowered[i] = append(t.lowered[i], strings.ToLower(Clean(r.Cells[c])))
+		n := min(len(r.Cells), len(t.cols))
+		t.cellWidth[i] = make([]int, n)
+		for c := range n {
+			clean := Clean(r.Cells[c])
+			t.cellWidth[i][c] = ansi.StringWidth(clean)
+			if t.cols[c].Filter {
+				t.lowered[i] = append(t.lowered[i], strings.ToLower(clean))
 			}
 		}
 	}
@@ -264,19 +283,26 @@ func (t *Table) setFilter(f string) {
 	t.refilter(true)
 }
 
-// refilter recomputes the visible rows. The selection follows its key; if
-// the key is gone it falls back to the first row when the filter changed
-// (the list was narrowed or widened by the user), or to the nearest row
-// otherwise (the resource disappeared).
+// refilter recomputes the visible rows and the columns' natural widths. The
+// selection follows its key; if the key is gone it falls back to the first
+// row when the filter changed (the list was narrowed or widened by the
+// user), or to the nearest row otherwise (the resource disappeared).
 func (t *Table) refilter(filterChanged bool) {
 	prev, hadPrev := t.Selected()
 	prevIdx := t.cursor
 
 	needle := strings.ToLower(strings.TrimSpace(t.filter))
 	t.visible = t.visible[:0:0]
+	t.natural = make([]int, 0, len(t.cols)) // fresh: a copied Table must not share it
+	for _, c := range t.cols {
+		t.natural = append(t.natural, max(c.Width, 1, ansi.StringWidth(Clean(c.Title))))
+	}
 	for i, r := range t.all {
 		if needle == "" || matches(t.lowered[i], needle) {
 			t.visible = append(t.visible, r)
+			for c, w := range t.cellWidth[i] {
+				t.natural[c] = max(t.natural[c], w)
+			}
 		}
 	}
 
@@ -335,33 +361,72 @@ func (t *Table) clampOffset() {
 	t.offset = max(min(t.offset, len(t.visible)-body), 0)
 }
 
-// widths computes the rendered column widths for the current table width.
+// widths computes the rendered column widths for the current table width,
+// less the gutter. Every column gets its minimum width (Column.Width). Any
+// spare width grows the flex columns toward their natural width, one cell
+// at a time in turn, and what is left after that goes to the last flex
+// column. When even the minimums do not fit, the line is cut (renderLine
+// fits it to the width).
 func (t *Table) widths() []int {
 	ws := make([]int, len(t.cols))
 	used := columnGap * max(len(t.cols)-1, 0)
-	flex := 0
+	var flex []int // indexes of the flex columns, in column order
 	for i, c := range t.cols {
 		ws[i] = max(c.Width, 1)
 		used += ws[i]
 		if c.Flex {
-			flex++
+			flex = append(flex, i)
 		}
 	}
-	if extra := t.width - used; extra > 0 && flex > 0 {
-		share, rem := extra/flex, extra%flex
-		for i, c := range t.cols {
-			if c.Flex {
-				ws[i] += share
-				if rem > 0 {
-					ws[i]++
-					rem--
-				}
-			}
-		}
+	extra := t.width - gutterWidth - used
+	if extra <= 0 || len(flex) == 0 {
+		return ws
 	}
+	extra = t.growToNatural(ws, flex, extra)
+	ws[flex[len(flex)-1]] += extra
 	return ws
 }
 
+// growToNatural water-fills up to extra cells into the flex columns of ws,
+// none past its natural width, and returns the cells it did not use. The
+// result is the same as handing out one cell at a time, left to right, to
+// the columns still below their natural width.
+func (t *Table) growToNatural(ws, flex []int, extra int) int {
+	need := func(i int) int {
+		if i >= len(t.natural) {
+			return 0 // not measured yet: no rows were ever set
+		}
+		return max(t.natural[i]-ws[i], 0)
+	}
+	// Columns by growth need, smallest first; ties keep column order.
+	order := slices.Clone(flex)
+	slices.SortStableFunc(order, func(a, b int) int { return need(a) - need(b) })
+	for k, i := range order {
+		n := len(order) - k // columns still growing, including i
+		if d := need(i); d*n <= extra {
+			// i reaches its natural width before the others stop growing.
+			ws[i] += d
+			extra -= d
+			continue
+		}
+		// Every remaining column needs more than an equal share: they all
+		// get the share, and the leftmost ones one cell more each.
+		rest := order[k:]
+		slices.Sort(rest)
+		share, rem := extra/n, extra%n
+		for j, c := range rest {
+			ws[c] += share
+			if j < rem {
+				ws[c]++
+			}
+		}
+		return 0
+	}
+	return extra
+}
+
+// renderLine renders cells in columns of widths ws, fitted to the table
+// width less the gutter. View adds the gutter.
 func (t *Table) renderLine(cells []string, ws []int) string {
 	var b strings.Builder
 	for i, w := range ws {
@@ -374,7 +439,25 @@ func (t *Table) renderLine(cells []string, ws []int) string {
 		}
 		b.WriteString(Fit(v, w))
 	}
-	return Fit(b.String(), t.width)
+	return Fit(b.String(), t.width-gutterWidth)
+}
+
+// gutter prepends the gutter to a rendered line: the selection marker and
+// the start of the selection bar on the selected row, blanks otherwise. On
+// a table narrower than the gutter, only the part of the gutter that fits
+// is returned.
+func (t *Table) gutter(line string, selected bool) string {
+	if t.width < gutterWidth {
+		if selected {
+			return Fit(Styles.SelectionMarker.Render(selectionMarker), t.width)
+		}
+		return strings.Repeat(" ", t.width)
+	}
+	if selected {
+		return Styles.SelectionMarker.Render(selectionMarker) +
+			Styles.TableSelected.Render(" "+line)
+	}
+	return strings.Repeat(" ", gutterWidth) + line
 }
 
 // View renders the table into exactly its height (lines) and width (cells).
@@ -392,25 +475,22 @@ func (t *Table) View() string {
 		titles[i] = c.Title
 	}
 	lines := make([]string, 0, t.height)
-	lines = append(lines, Styles.TableHeader.Render(t.renderLine(titles, ws)))
+	lines = append(lines, t.gutter(Styles.TableHeader.Render(t.renderLine(titles, ws)), false))
 
 	body := t.bodyHeight()
 	if len(t.visible) == 0 && body > 0 {
-		msg := t.emptyText
-		if t.filter != "" {
-			msg = "No rows match the filter " + Quote(t.filter) + "."
-		}
-		lines = append(lines, Styles.Empty.Render(Fit(" "+Clean(msg), t.width)))
+		lines = append(lines, t.emptyLines(body)...)
 	}
 	for i := t.offset; i < len(t.visible) && i < t.offset+body; i++ {
 		r := t.visible[i]
 		line := t.renderLine(r.Cells, ws)
 		if i == t.cursor {
-			// The selection is plain reverse video of the untoned line:
-			// reversing a toned line would turn the tone into the background.
-			line = Styles.TableSelected.Render(line)
+			// The selection bar is drawn over the untoned line: the tone's
+			// color is not shown on the selected row, whose state stays
+			// readable from its text (for example a state glyph).
+			line = t.gutter(line, true)
 		} else {
-			line = toneStyle(r.Tone, line)
+			line = t.gutter(toneStyle(r.Tone, line), false)
 		}
 		lines = append(lines, line)
 	}
@@ -421,6 +501,22 @@ func (t *Table) View() string {
 		lines = append(lines, Fit(t.input.View(), t.width))
 	}
 	return strings.Join(lines[:min(len(lines), t.height)], "\n")
+}
+
+// emptyLines renders the body area of a table with no visible rows: the
+// empty-list or no-match message, truncated to the table width and centered
+// in body lines of the full table width.
+func (t *Table) emptyLines(body int) []string {
+	msg := t.emptyText
+	if t.filter != "" {
+		msg = "No rows match the filter " + Quote(t.filter) + "."
+	}
+	msg = Styles.Empty.Render(Truncate(Clean(msg), t.width))
+	placed := strings.Split(lipgloss.Place(t.width, body, lipgloss.Center, lipgloss.Center, msg), "\n")
+	for i, l := range placed {
+		placed[i] = Fit(l, t.width) // Place leaves the width alone if nothing is to be added
+	}
+	return placed
 }
 
 // toneStyle renders an unselected row line in its tone's style. Unknown
