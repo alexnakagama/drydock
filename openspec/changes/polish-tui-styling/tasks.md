@@ -33,9 +33,9 @@
 
 ## 6. Integration check
 
-- [ ] 6.1 Run `go test ./...`, `go vet ./...` and `golangci-lint run`; all must pass.
-- [ ] 6.2 Run `openspec validate polish-tui-styling --strict`; it must pass.
-- [ ] 6.3 Launch drydock against a local engine on a dark and a light terminal theme, and with `NO_COLOR=1`. Check the selection marker, glyphs, tab pills, header bar, the delete confirmation's red border, the filter input's colors on the light theme, and the centered empty message (toggle `a` with nothing running). In the `NO_COLOR` run, the selection and states must be readable from the marker and glyphs alone.
+- [x] 6.1 Run `go test ./...`, `go vet ./...` and `golangci-lint run`; all must pass.
+- [x] 6.2 Run `openspec validate polish-tui-styling --strict`; it must pass.
+- [x] 6.3 Launch drydock against a local engine on a dark and a light terminal theme, and with `NO_COLOR=1`. Check the selection marker, glyphs, tab pills, header bar, the delete confirmation's red border, the filter input's colors on the light theme, and the centered empty message (toggle `a` with nothing running). In the `NO_COLOR` run, the selection and states must be readable from the marker and glyphs alone.
 
 ## Workflow follow-up
 
