@@ -481,6 +481,9 @@ func (v *logsView) Update(msg tea.Msg) tea.Cmd {
 		if v.searching {
 			return v.updateSearch(msg)
 		}
+	case tea.BackgroundColorMsg:
+		// The palette changed; the search input copied the old one.
+		components.StyleInput(&v.input)
 	default:
 		if v.searching {
 			return v.updateSearch(msg)

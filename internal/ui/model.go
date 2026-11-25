@@ -163,10 +163,13 @@ func (m *Model) newEntry(v View) entry {
 	return entry{id: m.nextView, view: v}
 }
 
-// Init implements tea.Model.
+// Init implements tea.Model. Besides starting the top view, it asks the
+// terminal for its background color, so the palette can follow it (see
+// tea.BackgroundColorMsg in Update). Until the terminal answers, or if it
+// never does, the dark palette is used.
 func (m *Model) Init() tea.Cmd {
 	t := m.stack[len(m.stack)-1]
-	return tagCmd(t.id, t.view.Init())
+	return tea.Batch(tea.RequestBackgroundColor, tagCmd(t.id, t.view.Init()))
 }
 
 func (m *Model) top() View { return m.stack[len(m.stack)-1].view }
@@ -201,6 +204,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			e.view.SetSize(m.contentSize())
 		}
 		return m, nil
+
+	case tea.BackgroundColorMsg:
+		// Styles is read at render time, so swapping it restyles everything
+		// on the next frame, except text inputs, which copy their styles:
+		// the root's own are restyled here, and views restyle theirs when
+		// the message reaches them.
+		components.Styles = components.NewStyles(msg.IsDark())
+		components.StyleInput(&m.command)
+		if m.overlay == overlayPrompt {
+			m.prompt.Restyle()
+		}
+		return m, m.broadcast(msg)
 
 	case store.SnapshotMsg:
 		if msg.Snapshot.Seq() <= m.snap.Seq() {

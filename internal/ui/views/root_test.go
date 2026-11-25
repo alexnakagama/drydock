@@ -1,6 +1,7 @@
 package views
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
@@ -168,5 +169,65 @@ func TestHelpFitsAt80x24(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("help lacks %q:\n%s", want, s)
 		}
+	}
+}
+
+// TestBackgroundColorRestylesViewInputs checks that the real views restyle
+// the text inputs they own when the terminal reports a light background:
+// each resource view's list filter, and the logs view's search input.
+func TestBackgroundColorRestylesViewInputs(t *testing.T) {
+	dark, light := components.NewStyles(true), components.NewStyles(false)
+	setup := map[string]func(e *env){
+		"containers": func(*env) {},
+		"images":     func(e *env) { e.command("images") },
+		"volumes":    func(e *env) { e.command("volumes") },
+		"logs":       func(e *env) { e.openLogs() },
+	}
+	for name, open := range setup {
+		t.Run(name, func(t *testing.T) {
+			// components.Styles is a package global: this test must not run
+			// in parallel with any test that renders.
+			saved := components.Styles
+			t.Cleanup(func() { components.Styles = saved })
+
+			e, _, _ := logEnv(t, 3, nil)
+			open(e)
+			e.press("/")
+			e.typeText("x")
+			raw := e.m.View().Content
+			if !strings.Contains(raw, dark.InputPrompt.Render("/")) {
+				t.Fatalf("before the report, input prompt not in the dark style:\n%q", raw)
+			}
+			e.deliver(tea.BackgroundColorMsg{Color: color.White})
+			raw = e.m.View().Content
+			if !strings.Contains(raw, light.InputPrompt.Render("/")) {
+				t.Errorf("after a light report, input prompt not in the light style:\n%q", raw)
+			}
+		})
+	}
+}
+
+// TestBackgroundColorRestylesViewsBelowTop checks that a view below the top
+// of the stack restyles its input too: the containers filter, applied before
+// the logs view was pushed, shows the light prompt once the user comes back
+// and edits it.
+func TestBackgroundColorRestylesViewsBelowTop(t *testing.T) {
+	saved := components.Styles // a package global: this test must stay serial
+	t.Cleanup(func() { components.Styles = saved })
+
+	e, _, _ := logEnv(t, 3, nil)
+	e.press("/")
+	e.typeText("we")
+	e.press("enter")
+	e.openLogs()
+	e.deliver(tea.BackgroundColorMsg{Color: color.White})
+	e.press("esc") // back to the containers view
+	if !strings.Contains(e.header(), "containers") {
+		t.Fatalf("not back on containers: header %q", e.header())
+	}
+	e.press("/")
+	raw := e.m.View().Content
+	if !strings.Contains(raw, components.NewStyles(false).InputPrompt.Render("/")) {
+		t.Errorf("containers filter below the logs view not restyled:\n%q", raw)
 	}
 }

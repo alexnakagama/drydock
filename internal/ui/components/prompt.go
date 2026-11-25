@@ -35,6 +35,10 @@ func NewPrompt(title, placeholder string) (Prompt, tea.Cmd) {
 	return p, p.input.Focus()
 }
 
+// Restyle applies the current Styles to the prompt's input, after a
+// palette change.
+func (p *Prompt) Restyle() { StyleInput(&p.input) }
+
 // Value returns the text typed so far, with surrounding spaces removed.
 func (p Prompt) Value() string { return strings.TrimSpace(p.input.Value()) }
 

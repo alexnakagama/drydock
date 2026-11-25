@@ -29,7 +29,7 @@ See proposal.md for motivation and specs/tui-navigation/spec.md for the behavior
 
 ### 1. Palette: two built style sets, swapped on the terminal's background report
 
-`styles.go` gets `newStyles(dark bool) StyleSet`. `Styles` starts as `newStyles(true)`. `Model.Init` sends `tea.RequestBackgroundColor`. On `tea.BackgroundColorMsg`, `Update` sets `components.Styles = newStyles(msg.IsDark())`.
+`styles.go` gets `NewStyles(dark bool) StyleSet`. `Styles` starts as `NewStyles(true)`. `Model.Init` sends `tea.RequestBackgroundColor`. On `tea.BackgroundColorMsg`, `Update` sets `components.Styles = NewStyles(msg.IsDark())`.
 
 - **Why this is safe:** bubbletea runs `Update` and `View` on one goroutine, so swapping the global needs no locking.
 - **Alternative rejected: `lipgloss.LightDark` resolved at init via a direct terminal query.** That reads stdin outside bubbletea's input reader and can steal or block key input.

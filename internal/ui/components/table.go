@@ -182,6 +182,11 @@ func (t *Table) ClearFilter() {
 // Update handles navigation and filter keys. It reports whether msg was a
 // key the table consumed; unconsumed keys are left to the view.
 func (t *Table) Update(msg tea.Msg) (bool, tea.Cmd) {
+	if _, ok := msg.(tea.BackgroundColorMsg); ok {
+		// The palette changed; the filter input copied the old one.
+		StyleInput(&t.input)
+		return false, nil
+	}
 	if t.filtering {
 		return t.updateFilter(msg)
 	}
