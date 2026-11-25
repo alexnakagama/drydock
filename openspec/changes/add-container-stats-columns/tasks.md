@@ -74,7 +74,7 @@
 
 ## 4. Root model: show/hide signal
 
-- [ ] 4.1 In `internal/ui/view.go`, add the optional `Activatable` interface (design.md D3). In `internal/ui/model.go`, call `SetActive` as follows, and tag every returned command like other view commands:
+- [x] 4.1 In `internal/ui/view.go`, add the optional `Activatable` interface (design.md D3). In `internal/ui/model.go`, call `SetActive` as follows, and tag every returned command like other view commands:
   - `SetActive(true)` on the root from `Model.Init`, after its `Init`.
   - `SetActive(false)` on the old top before `push`, and `SetActive(true)` on the pushed view after its `Init`.
   - `SetActive(true)` on the new root after `replace`.

@@ -169,7 +169,18 @@ func (m *Model) newEntry(v View) entry {
 // never does, the dark palette is used.
 func (m *Model) Init() tea.Cmd {
 	t := m.stack[len(m.stack)-1]
-	return tea.Batch(tea.RequestBackgroundColor, tagCmd(t.id, t.view.Init()))
+	initCmd := tagCmd(t.id, t.view.Init())
+	return tea.Batch(tea.RequestBackgroundColor, initCmd, setActive(t, true))
+}
+
+// setActive tells e's view whether it is on screen, if it implements
+// Activatable, and returns its command tagged with e's id.
+func setActive(e entry, active bool) tea.Cmd {
+	a, ok := e.view.(Activatable)
+	if !ok {
+		return nil
+	}
+	return tagCmd(e.id, a.SetActive(active))
 }
 
 func (m *Model) top() View { return m.stack[len(m.stack)-1].view }
@@ -380,7 +391,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.quit()
 	case key.Matches(msg, g.Back):
 		if !m.top().Back() {
-			m.pop()
+			return m.pop()
 		}
 		return nil
 	case key.Matches(msg, g.NextTab):
@@ -510,32 +521,39 @@ func (m *Model) runCommand(input string) tea.Cmd {
 	return m.switchTo(i)
 }
 
-// push adds v on top of the stack.
+// push adds v on top of the stack. The view it covers is deactivated first,
+// and v is activated after its Init.
 func (m *Model) push(v View) tea.Cmd {
+	deactivate := setActive(m.stack[len(m.stack)-1], false)
 	v.SetSize(m.contentSize())
 	e := m.newEntry(v)
 	m.stack = append(m.stack, e)
-	return tagCmd(e.id, v.Init())
+	initCmd := tagCmd(e.id, v.Init())
+	return tea.Batch(deactivate, initCmd, setActive(e, true))
 }
 
-// pop removes the top view, but never the root view.
-func (m *Model) pop() {
+// pop removes the top view, but never the root view, and activates the view
+// it reveals.
+func (m *Model) pop() tea.Cmd {
 	if len(m.stack) <= 1 {
-		return
+		return nil
 	}
 	top := m.top()
 	m.stack[len(m.stack)-1] = entry{}
 	m.stack = m.stack[:len(m.stack)-1]
 	top.Close()
+	return setActive(m.stack[len(m.stack)-1], true)
 }
 
-// replace closes every view and makes v the new root view.
+// replace closes every view and makes v the new root view, activated after
+// its Init. The old views are only closed, never deactivated.
 func (m *Model) replace(v View) tea.Cmd {
 	m.Close()
 	v.SetSize(m.contentSize())
 	e := m.newEntry(v)
 	m.stack = []entry{e}
-	return tagCmd(e.id, v.Init())
+	initCmd := tagCmd(e.id, v.Init())
+	return tea.Batch(initCmd, setActive(e, true))
 }
 
 func (m *Model) quit() tea.Cmd {
