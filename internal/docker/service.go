@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"iter"
 
@@ -52,6 +53,12 @@ type Service interface {
 	// github.com/moby/moby/api/pkg/stdcopy. The caller must close it; it is
 	// also closed when ctx is cancelled.
 	ContainerLogs(ctx context.Context, id string, opts LogsOptions) (io.ReadCloser, error)
+	// ContainerStats opens the container's live resource-usage stream. The
+	// engine sends a sample about once a second; the first sample's
+	// PreCPUStats is empty, and each later one carries the previous sample's
+	// CPU counters. The stream ends when the container stops. The caller
+	// must close it; it is also closed when ctx is cancelled.
+	ContainerStats(ctx context.Context, id string) (StatsStream, error)
 
 	// ImageList lists top-level images, including dangling ones.
 	ImageList(ctx context.Context) ([]image.Summary, error)
@@ -190,5 +197,24 @@ type PullStream interface {
 	Messages(ctx context.Context) iter.Seq2[jsonstream.Message, error]
 	// Close aborts the pull if it is still running. It is safe to call more
 	// than once.
+	Close() error
+}
+
+// ErrStatsStreamClosed is the final error of a StatsStream iterated after,
+// or while, it was closed with Close.
+var ErrStatsStreamClosed = errors.New("docker: stats stream closed")
+
+// StatsStream is an open container stats stream. See Service.ContainerStats.
+type StatsStream interface {
+	// Samples decodes the stream's samples in order. The stream is closed
+	// when the sequence ends, when the consumer stops iterating, or when ctx
+	// is cancelled. A stream the engine ends cleanly (the container stopped)
+	// ends the sequence without an error; transport and decoding failures,
+	// and cancellation (ctx's error), are yielded as a final error. After
+	// Close, including a second iteration, the final error is
+	// ErrStatsStreamClosed. Samples is meant to be iterated once.
+	Samples(ctx context.Context) iter.Seq2[container.StatsResponse, error]
+	// Close ends the stream. It is safe to call more than once and
+	// concurrently with Samples.
 	Close() error
 }

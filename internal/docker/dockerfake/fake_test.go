@@ -798,3 +798,396 @@ func TestConcurrentUse(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func statsSample(total uint64) container.StatsResponse {
+	return container.StatsResponse{
+		CPUStats:    container.CPUStats{CPUUsage: container.CPUUsage{TotalUsage: total, PercpuUsage: []uint64{total}}},
+		MemoryStats: container.MemoryStats{Usage: total, Stats: map[string]uint64{"inactive_file": 1}},
+	}
+}
+
+// statsResult is the outcome of iterating a stats stream in the background.
+type statsResult struct {
+	samples chan container.StatsResponse
+	end     chan error // receives the final error (nil for a clean end)
+}
+
+func iterateStats(ctx context.Context, st docker.StatsStream) statsResult {
+	r := statsResult{samples: make(chan container.StatsResponse, 16), end: make(chan error, 1)}
+	go func() {
+		for s, err := range st.Samples(ctx) {
+			if err != nil {
+				r.end <- err
+				return
+			}
+			r.samples <- s
+		}
+		r.end <- nil
+	}()
+	return r
+}
+
+func (r statsResult) next(t *testing.T) container.StatsResponse {
+	t.Helper()
+	select {
+	case s := <-r.samples:
+		return s
+	case err := <-r.end:
+		// The iterator sends every sample before the end, so a sample may
+		// be pending although select picked the end.
+		select {
+		case s := <-r.samples:
+			r.end <- err // put the end back for a later wait
+			return s
+		default:
+		}
+		t.Fatalf("stats stream ended: %v", err)
+	case <-time.After(waitTimeout):
+		t.Fatal("timed out waiting for a stats sample")
+	}
+	return container.StatsResponse{}
+}
+
+func (r statsResult) wait(t *testing.T) error {
+	t.Helper()
+	select {
+	case err := <-r.end:
+		return err
+	case s := <-r.samples:
+		t.Fatalf("unexpected sample %+v", s)
+	case <-time.After(waitTimeout):
+		t.Fatal("timed out waiting for the stats stream to end")
+	}
+	return nil
+}
+
+func waitStatsStreams(t *testing.T, f *Service, want int) {
+	t.Helper()
+	deadline := time.Now().Add(waitTimeout)
+	for f.StatsStreams() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("StatsStreams() = %d, want %d", f.StatsStreams(), want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestContainerStatsYieldsQueuedSamplesInOrder(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:n"))
+	f.SetStats(id, statsSample(1), statsSample(2)) // queued before the stream opens
+
+	st, err := f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatalf("ContainerStats: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	r := iterateStats(ctx, st)
+	for _, want := range []uint64{1, 2} {
+		if got := r.next(t).CPUStats.CPUUsage.TotalUsage; got != want {
+			t.Errorf("sample TotalUsage = %d, want %d", got, want)
+		}
+	}
+	f.SetStats("web", statsSample(3)) // by name, while the stream waits
+	if got := r.next(t).CPUStats.CPUUsage.TotalUsage; got != 3 {
+		t.Errorf("sample TotalUsage = %d, want 3", got)
+	}
+	if n := len(f.CallsTo(MethodContainerStats)); n != 1 {
+		t.Errorf("recorded %d ContainerStats calls, want 1", n)
+	}
+}
+
+func TestContainerStatsSamplesAreCopied(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:n"))
+	sample := statsSample(1)
+	f.SetStats(id, sample)
+	sample.CPUStats.CPUUsage.PercpuUsage[0] = 99
+	sample.MemoryStats.Stats["inactive_file"] = 99
+
+	st, err := f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	got := iterateStats(ctx, st).next(t)
+	if got.CPUStats.CPUUsage.PercpuUsage[0] != 1 || got.MemoryStats.Stats["inactive_file"] != 1 {
+		t.Errorf("queued sample shares memory with the caller: %+v", got)
+	}
+}
+
+func TestContainerStatsCount(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:n"))
+
+	st1, err := f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sctx, cancel := context.WithCancel(ctx)
+	if _, err := f.ContainerStats(sctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.StatsStreams(); n != 2 {
+		t.Fatalf("StatsStreams() = %d after opening 2, want 2", n)
+	}
+
+	if err := st1.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+	if err := st1.Close(); err != nil {
+		t.Errorf("second Close: %v", err)
+	}
+	if n := f.StatsStreams(); n != 1 {
+		t.Errorf("StatsStreams() = %d after Close, want 1", n)
+	}
+	if err := iterateStats(ctx, st1).wait(t); !errors.Is(err, docker.ErrStatsStreamClosed) {
+		t.Errorf("iterating a closed stream: err = %v, want ErrStatsStreamClosed", err)
+	}
+
+	cancel() // never iterated: cancelling ctx alone releases it
+	waitStatsStreams(t, f, 0)
+}
+
+func TestContainerStatsCancelEndsIteration(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:n"))
+	st, err := f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ictx, cancel := context.WithCancel(ctx)
+	r := iterateStats(ictx, st)
+	cancel()
+	if err := r.wait(t); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	waitStatsStreams(t, f, 0)
+}
+
+func TestContainerStatsDisconnect(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:n"))
+	st, err := f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := iterateStats(ctx, st)
+	f.Disconnect(nil)
+	if err := r.wait(t); err == nil || docker.ClassifyConnectError(err) != docker.FailureNotRunning {
+		t.Errorf("stream error = %v, want a connection error", err)
+	}
+	waitStatsStreams(t, f, 0)
+	if _, err := f.ContainerStats(ctx, id); err == nil {
+		t.Error("ContainerStats succeeded while disconnected")
+	}
+
+	f.Reconnect()
+	st, err = f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatalf("ContainerStats after reconnect: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	f.SetStats(id, statsSample(7))
+	if got := iterateStats(ctx, st).next(t).CPUStats.CPUUsage.TotalUsage; got != 7 {
+		t.Errorf("sample after reconnect = %d, want 7", got)
+	}
+}
+
+func TestContainerStatsEndsWhenContainerStops(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	stop := func(id string) { _ = f.ContainerStop(ctx, id) }
+	remove := func(id string) {
+		_ = f.ContainerRemove(ctx, id, docker.ContainerRemoveOptions{Force: true})
+	}
+	external := func(id string) { f.RemoveContainer(id) }
+	replace := func(id string) {
+		c := exited("web", "nginx", "sha256:n")
+		c.ID = id
+		f.AddContainer(c)
+	}
+	for name, end := range map[string]func(string){
+		"stop": stop, "remove": remove, "external remove": external, "replaced by stopped": replace,
+	} {
+		t.Run(name, func(t *testing.T) {
+			id := f.AddContainer(running("web-"+name, "nginx", "sha256:n"))
+			other := f.AddContainer(running("other-"+name, "nginx", "sha256:n"))
+			st, err := f.ContainerStats(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ost, err := f.ContainerStats(ctx, other)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = ost.Close() }()
+			r := iterateStats(ctx, st)
+			end(id)
+			if err := r.wait(t); err != nil {
+				t.Errorf("stream ended with %v, want a clean end", err)
+			}
+			// Other containers' streams keep running.
+			f.SetStats(other, statsSample(5))
+			if got := iterateStats(ctx, ost).next(t).CPUStats.CPUUsage.TotalUsage; got != 5 {
+				t.Errorf("other stream sample = %d, want 5", got)
+			}
+		})
+	}
+	waitStatsStreams(t, f, 0)
+}
+
+func TestContainerStatsErrors(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	stopped := f.AddContainer(exited("old", "nginx", "sha256:n"))
+	paused := running("paused", "nginx", "sha256:n")
+	paused.State = container.StatePaused
+	pausedID := f.AddContainer(paused)
+	web := f.AddContainer(running("web", "nginx", "sha256:n"))
+
+	if _, err := f.ContainerStats(ctx, "missing"); !docker.IsNotFound(err) {
+		t.Errorf("unknown container: err = %v, want not found", err)
+	}
+	if _, err := f.ContainerStats(ctx, "../images/x"); !docker.IsInvalidArgument(err) {
+		t.Errorf("invalid ID: err = %v, want invalid argument", err)
+	}
+	for _, id := range []string{stopped, pausedID} {
+		if _, err := f.ContainerStats(ctx, id); !docker.IsConflict(err) {
+			t.Errorf("non-running %s: err = %v, want conflict", id[:12], err)
+		}
+	}
+	boom := errors.New("boom")
+	f.FailNext(MethodContainerStats, boom)
+	if _, err := f.ContainerStats(ctx, web); !errors.Is(err, boom) {
+		t.Errorf("injected: err = %v, want %v", err, boom)
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := f.ContainerStats(cctx, web); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled ctx: err = %v", err)
+	}
+	if n := f.StatsStreams(); n != 0 {
+		t.Errorf("failed opens left %d streams open", n)
+	}
+}
+
+func TestContainerStatsCloseEndsService(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:n"))
+	st, err := f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := iterateStats(ctx, st)
+	_ = f.Close()
+	if err := r.wait(t); err == nil {
+		t.Error("closing the service ended the stream without an error")
+	}
+	waitStatsStreams(t, f, 0)
+}
+
+func TestContainerStatsConcurrentUse(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	ids := make([]string, 8)
+	for i := range ids {
+		ids[i] = f.AddContainer(running("c"+string(rune('a'+i)), "img", "sha256:x"))
+	}
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Go(func() {
+			for range 20 {
+				sctx, cancel := context.WithCancel(ctx)
+				st, err := f.ContainerStats(sctx, id)
+				if err != nil {
+					cancel()
+					continue // the container may have been stopped below
+				}
+				f.SetStats(id, statsSample(1))
+				for _, err := range st.Samples(sctx) {
+					_ = err
+					break
+				}
+				cancel()
+			}
+			if i%2 == 0 {
+				_ = f.ContainerStop(ctx, id)
+			}
+		})
+	}
+	wg.Wait()
+	waitStatsStreams(t, f, 0)
+}
+
+func TestContainerStatsStopDeliversQueuedSamplesThenEnds(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:n"))
+	st, err := f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Queue and stop before anyone reads: the outcome must not depend on
+	// goroutine timing.
+	f.SetStats(id, statsSample(1), statsSample(2))
+	if err := f.ContainerStop(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	r := iterateStats(ctx, st)
+	for _, want := range []uint64{1, 2} {
+		if got := r.next(t).CPUStats.CPUUsage.TotalUsage; got != want {
+			t.Errorf("sample TotalUsage = %d, want %d", got, want)
+		}
+	}
+	if err := r.wait(t); err != nil {
+		t.Errorf("stream ended with %v, want a clean end", err)
+	}
+
+	// Nothing stale survives into the next run of the container.
+	if err := f.ContainerStart(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	st, err = f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	r = iterateStats(ctx, st)
+	f.SetStats(id, statsSample(9))
+	if got := r.next(t).CPUStats.CPUUsage.TotalUsage; got != 9 {
+		t.Errorf("first sample after restart = %d, want 9 (a stale sample leaked)", got)
+	}
+}
+
+func TestContainerStatsDisconnectDropsQueuedSamples(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:n"))
+	st, err := f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.SetStats(id, statsSample(1))
+	f.Disconnect(nil)
+	if err := iterateStats(ctx, st).wait(t); err == nil {
+		t.Error("a lost connection ended the stream without an error")
+	}
+}

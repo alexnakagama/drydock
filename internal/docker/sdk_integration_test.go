@@ -7,9 +7,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/client"
 	"github.com/moby/moby/client/pkg/versions"
@@ -17,7 +21,9 @@ import (
 
 // These tests run against the engine configured by the environment
 // (DOCKER_HOST or the default socket): go test -tags integration ./...
-// They only create volumes named "drydock-it-*" and remove them afterwards.
+// They only create volumes named "drydock-it-*" and containers labelled
+// drydock-it=1 (with the docker CLI, from alpine:latest, which must be present
+// or pullable), and remove them afterwards.
 
 func newIntegrationService(t *testing.T) *SDKService {
 	t.Helper()
@@ -161,6 +167,81 @@ func TestIntegrationRejectsInvalidIdentifiers(t *testing.T) {
 	}
 	if _, err := svc.ImageRemove(ctx, "../../containers/x", ImageRemoveOptions{}); !IsInvalidArgument(err) {
 		t.Errorf("ImageRemove with traversal: err = %v, want invalid argument", err)
+	}
+	if st, err := svc.ContainerStats(ctx, "../images/x"); !IsInvalidArgument(err) {
+		if st != nil {
+			_ = st.Close()
+		}
+		t.Errorf("ContainerStats with traversal: err = %v, want invalid argument", err)
+	}
+}
+
+// runITContainer starts a labelled alpine:latest container running cmd and
+// removes it when the test ends.
+func runITContainer(t *testing.T, cmd ...string) string {
+	t.Helper()
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker CLI not found")
+	}
+	args := append([]string{"run", "-d", "--rm", "--label", "drydock-it=1", "alpine:latest"}, cmd...)
+	out, err := exec.Command("docker", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker run: %v: %s", err, out)
+	}
+	id := strings.TrimSpace(string(out))
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
+	return id
+}
+
+func TestIntegrationContainerStats(t *testing.T) {
+	svc := newIntegrationService(t)
+	id := runITContainer(t, "sleep", "300")
+
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	st, err := svc.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatalf("ContainerStats: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	type result struct {
+		samples []container.StatsResponse
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		var r result
+		for sample, err := range st.Samples(ctx) {
+			if err != nil {
+				r.err = err
+				break
+			}
+			r.samples = append(r.samples, sample)
+			if len(r.samples) == 2 {
+				cancel()
+			}
+		}
+		done <- r
+	}()
+
+	var r result
+	select {
+	case r = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stats iteration did not end after ctx was cancelled")
+	}
+	if len(r.samples) < 2 {
+		t.Fatalf("got %d samples within 3s (err %v), want at least 2", len(r.samples), r.err)
+	}
+	if !errors.Is(r.err, context.Canceled) {
+		t.Errorf("iteration ended with %v, want context.Canceled", r.err)
+	}
+	if got := r.samples[0].PreCPUStats.SystemUsage; got != 0 {
+		t.Errorf("first sample PreCPUStats.SystemUsage = %d, want 0", got)
+	}
+	if r.samples[1].PreCPUStats.SystemUsage == 0 {
+		t.Error("second sample PreCPUStats.SystemUsage = 0, want non-zero")
 	}
 }
 
