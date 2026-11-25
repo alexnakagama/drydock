@@ -15,8 +15,8 @@
 
 ## 3. Container state glyphs
 
-- [ ] 3.1 In `internal/ui/views/containers.go`, add `containerGlyph(state)` next to `containerTone`, using the same state grouping. Prefix the STATUS cell with the glyph and a space, and raise STATUS's minimum width from 22 to 24. Verify with `containers_test.go` cases: running → `●`, paused/restarting → `◐`, exited/created/dead → `○`, removing → blank; every state's glyph agrees with `containerTone`; the selected running row still shows `●`.
-- [ ] 3.2 Regenerate the `containers_*` goldens, read the diffs (only the STATUS cells and widths may change), and confirm `go test ./internal/ui/...` passes.
+- [x] 3.1 In `internal/ui/views/containers.go`, add `containerGlyph(state)` next to `containerTone`, using the same state grouping. Prefix the STATUS cell with the glyph and a space, and raise STATUS's minimum width from 22 to 24. Verify with `containers_test.go` cases: running → `●`, paused/restarting → `◐`, exited/created/dead → `○`, removing → blank; every state's glyph agrees with `containerTone`; the selected running row still shows `●`.
+- [x] 3.2 Regenerate the `containers_*` goldens, read the diffs (only the STATUS cells and widths may change), and confirm `go test ./internal/ui/...` passes.
 
 ## 4. Content-sized dialogs
 

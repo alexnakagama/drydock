@@ -34,7 +34,7 @@ func nextViewID() uint64 { return viewIDs.Add(1) }
 var containerColumns = []components.Column{
 	{Title: "NAME", Width: 20, Flex: true, Filter: true},
 	{Title: "IMAGE", Width: 24, Flex: true, Filter: true},
-	{Title: "STATUS", Width: 22},
+	{Title: "STATUS", Width: 24}, // a state glyph, a space, then the status
 	{Title: "PORTS", Width: 24, Flex: true},
 }
 
@@ -264,7 +264,7 @@ func (v *containersView) refresh() {
 		rows[i] = components.Row{Key: c.ID, Tone: containerTone(c.State), Cells: []string{
 			store.ContainerName(c),
 			displayImage(c.Image),
-			displayStatus(c),
+			containerGlyph(c.State) + " " + displayStatus(c),
 			FormatPorts(c.Ports),
 		}}
 	}
@@ -295,6 +295,25 @@ func containerTone(s container.ContainerState) components.Tone {
 		return components.ToneDim
 	default:
 		return components.ToneDefault
+	}
+}
+
+// containerGlyph returns the glyph that begins a container's STATUS cell:
+// ● for running, ◐ for paused and restarting, ○ for exited, created and
+// dead, and a blank for any other state. It is derived from containerTone,
+// so the glyph and the row color always agree. The glyph is part of the
+// cell text, so the state stays readable on the selected row (which is not
+// colored) and without color.
+func containerGlyph(s container.ContainerState) string {
+	switch containerTone(s) {
+	case components.ToneGood:
+		return "●"
+	case components.ToneWarn:
+		return "◐"
+	case components.ToneDim:
+		return "○"
+	default:
+		return " "
 	}
 }
 
