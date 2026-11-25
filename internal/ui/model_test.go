@@ -1961,3 +1961,283 @@ func TestPromptScrollsAtTerminalWidth(t *testing.T) {
 		}
 	}
 }
+
+// --- show/hide signal (Activatable) ---
+
+// activeView is a list view that records, in a log shared with other views,
+// every Init, SetActive and Close call it gets, as "name:event". onActive,
+// if set, is the command SetActive returns.
+type activeView struct {
+	*listView
+	log      *[]string
+	onActive func(active bool) tea.Cmd
+}
+
+func newActiveView(name string, log *[]string) *activeView {
+	return &activeView{listView: newListView(name, row("c1", "db", "postgres", "")), log: log}
+}
+
+func (v *activeView) record(event string) { *v.log = append(*v.log, v.name+":"+event) }
+
+func (v *activeView) Init() tea.Cmd {
+	v.record("init")
+	return nil
+}
+
+func (v *activeView) SetActive(active bool) tea.Cmd {
+	if active {
+		v.record("active")
+	} else {
+		v.record("inactive")
+	}
+	if v.onActive != nil {
+		return v.onActive(active)
+	}
+	return nil
+}
+
+func (v *activeView) Close() {
+	v.record("close")
+	v.listView.Close()
+}
+
+var _ Activatable = (*activeView)(nil)
+
+// newActiveHarness is a harness whose resource views ("containers" and
+// "images") are activeViews logging into log, starting on containers.
+func newActiveHarness(t *testing.T, log *[]string) *harness {
+	t.Helper()
+	h := &harness{t: t, views: map[string][]*listView{}}
+	mk := func(name string) func(store.Snapshot) View {
+		return func(store.Snapshot) View {
+			v := newActiveView(name, log)
+			h.views[name] = append(h.views[name], v.listView)
+			return v
+		}
+	}
+	h.m = New([]Resource{
+		{Name: "containers", New: mk("containers")},
+		{Name: "images", New: mk("images")},
+	}, "containers")
+	h.m.after = func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil }
+	h.send(h.m.Init())
+	h.update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	return h
+}
+
+func checkLog(t *testing.T, step string, log *[]string, want ...string) {
+	t.Helper()
+	if !slices.Equal(*log, want) {
+		t.Errorf("%s: calls %q, want %q", step, *log, want)
+	}
+	*log = nil
+}
+
+func TestInitActivatesRootView(t *testing.T) {
+	var log []string
+	newActiveHarness(t, &log)
+	checkLog(t, "Init", &log, "containers:init", "containers:active")
+}
+
+func TestPushAndPopSwitchActivity(t *testing.T) {
+	var log []string
+	h := newActiveHarness(t, &log)
+	log = nil
+	root := h.top()
+
+	child := newActiveView("logs", &log)
+	h.send(Push(child))
+	if h.top() != View(child) {
+		t.Fatalf("top is %T after push, want the pushed view", h.top())
+	}
+	checkLog(t, "push", &log, "containers:inactive", "logs:init", "logs:active")
+
+	h.press("esc")
+	if h.top() != root {
+		t.Fatalf("top is %T after esc, want the root view", h.top())
+	}
+	checkLog(t, "esc", &log, "logs:close", "containers:active")
+
+	h.press("esc") // at the root: nothing to pop, nothing to activate
+	checkLog(t, "esc at root", &log)
+}
+
+// TestPushNonActivatableView checks that views without SetActive
+// are pushed and popped as before, next to views that have it.
+func TestPushNonActivatableView(t *testing.T) {
+	var log []string
+	h := newActiveHarness(t, &log)
+	log = nil
+	d := &detailView{crumbs: []string{"detail"}}
+	h.send(Push(d))
+	checkLog(t, "push", &log, "containers:inactive")
+	h.press("esc")
+	if d.closed != 1 {
+		t.Errorf("popped view closed %d times, want 1", d.closed)
+	}
+	checkLog(t, "esc", &log, "containers:active")
+}
+
+func TestSwitchTabActivatesNewRoot(t *testing.T) {
+	var log []string
+	h := newActiveHarness(t, &log)
+	h.send(Push(newActiveView("logs", &log)))
+	log = nil
+
+	h.press(":")
+	h.typeText("images")
+	h.press("enter")
+	checkLog(t, "switch", &log, "logs:close", "containers:close", "images:init", "images:active")
+
+	// The closed views get nothing more, whatever happens next.
+	h.send(Push(newActiveView("logs2", &log)))
+	h.press("esc")
+	checkLog(t, "after switch", &log, "images:inactive", "logs2:init", "logs2:active", "logs2:close", "images:active")
+}
+
+func TestOverlaysDoNotChangeActivity(t *testing.T) {
+	var log []string
+	h := newActiveHarness(t, &log)
+	log = nil
+
+	h.press("?")
+	if h.m.overlay != overlayHelp {
+		t.Fatal("? did not open help")
+	}
+	h.press("?")
+	h.press("d") // the list view asks for a confirmation
+	if h.m.overlay != overlayConfirm {
+		t.Fatal("d did not open the confirmation")
+	}
+	h.press("n")
+	h.send(Prompt("Name", "", nil))
+	h.press("esc")
+	h.press(":")
+	h.press("esc")
+	if h.m.overlay != overlayNone {
+		t.Fatalf("overlay %v still open", h.m.overlay)
+	}
+	checkLog(t, "overlays", &log)
+}
+
+// TestSetActiveCommandsAreTagged checks that the commands SetActive returns
+// carry the view's origin: a push requested on deactivation arrives after
+// another view covers the requester, so it is dropped, while one requested
+// on activation by the top view is honored.
+func TestSetActiveCommandsAreTagged(t *testing.T) {
+	var log []string
+	h := newActiveHarness(t, &log)
+	root := h.top().(*activeView)
+	late := &detailView{crumbs: []string{"late"}}
+	root.onActive = func(active bool) tea.Cmd {
+		if active {
+			return nil
+		}
+		return Push(late)
+	}
+	child := newActiveView("logs", &log)
+	grand := &detailView{crumbs: []string{"grand"}}
+	child.onActive = func(active bool) tea.Cmd {
+		if active {
+			return Push(grand)
+		}
+		return nil
+	}
+
+	h.send(Push(child))
+	if late.closed != 1 {
+		t.Errorf("push requested by the covered view: closed %d times, want 1 (dropped)", late.closed)
+	}
+	if len(h.m.stack) != 3 || h.top() != View(grand) {
+		t.Errorf("stack has %d views with top %T, want the push requested by the active view honored", len(h.m.stack), h.top())
+	}
+}
+
+// pushOrigins returns the origins of the push requests among msgs.
+func pushOrigins(msgs []tea.Msg) []uint64 {
+	var out []uint64
+	for _, msg := range msgs {
+		if p, ok := msg.(pushMsg); ok {
+			out = append(out, p.origin)
+		}
+	}
+	return out
+}
+
+// TestActivationCommandsCarryTopOrigin checks that the command returned with
+// every SetActive(true) (from Init, pop and replace) is tagged with the id of
+// the view it activates, not left untagged (which is always accepted) or
+// tagged with another view's id.
+func TestActivationCommandsCarryTopOrigin(t *testing.T) {
+	var log []string
+	pushOnActive := func(active bool) tea.Cmd {
+		if !active {
+			return nil
+		}
+		return Push(&detailView{crumbs: []string{"x"}})
+	}
+	m := New([]Resource{
+		{Name: "containers", New: func(store.Snapshot) View {
+			v := newActiveView("containers", &log)
+			v.onActive = pushOnActive
+			return v
+		}},
+		{Name: "images", New: func(store.Snapshot) View {
+			v := newActiveView("images", &log)
+			v.onActive = pushOnActive
+			return v
+		}},
+	}, "containers")
+	m.after = func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil }
+
+	check := func(step string, cmd tea.Cmd) {
+		t.Helper()
+		got := pushOrigins(uitest.Run(t, cmd))
+		if want := []uint64{m.topID()}; !slices.Equal(got, want) {
+			t.Errorf("%s: push origins %v, want %v (the activated view)", step, got, want)
+		}
+	}
+	check("Init", m.Init())
+
+	m.push(&detailView{crumbs: []string{"detail"}})
+	_, cmd := m.Update(uitest.KeyPress("esc"))
+	check("pop", cmd)
+
+	check("replace", m.switchTo(1))
+}
+
+// TestReplacedRootRequestsAreDropped checks that a push requested by a root
+// view after a tab switch replaced it is dropped without touching the new
+// root's activity.
+func TestReplacedRootRequestsAreDropped(t *testing.T) {
+	var log []string
+	h := newActiveHarness(t, &log)
+	oldID := h.m.topID()
+	h.press(":")
+	h.typeText("images")
+	h.press("enter")
+	log = nil
+
+	late := newActiveView("late", &log)
+	h.update(pushMsg{view: late, origin: oldID})
+	checkLog(t, "stale push", &log, "late:close")
+	if len(h.m.stack) != 1 {
+		t.Errorf("stack has %d views, want the stale push dropped", len(h.m.stack))
+	}
+}
+
+// TestNoActivityAfterQuit checks that quitting only closes views, and that a
+// push arriving afterwards is closed without being initialized or activated.
+func TestNoActivityAfterQuit(t *testing.T) {
+	var log []string
+	h := newActiveHarness(t, &log)
+	h.send(Push(newActiveView("logs", &log)))
+	log = nil
+
+	if msgs := h.press("ctrl+c"); !uitest.IsQuit(msgs) {
+		t.Fatal("ctrl+c did not quit")
+	}
+	h.update(pushMsg{view: newActiveView("late", &log)})
+	h.press("esc")
+	checkLog(t, "quit", &log, "logs:close", "containers:close", "late:close")
+}

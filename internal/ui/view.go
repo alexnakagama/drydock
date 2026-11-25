@@ -72,6 +72,24 @@ type Positioner interface {
 	Position() (selected, listed, total int, filtered bool)
 }
 
+// Activatable is implemented by views that need to know whether they are on
+// screen, that is, the top of the view stack. The root detects it with a type
+// assertion and calls SetActive on the UI goroutine:
+//
+//   - SetActive(true) when the view becomes the top: after its Init when it
+//     starts as the root, is pushed, or replaces the stack, and when the view
+//     above it is popped.
+//   - SetActive(false) just before another view is pushed on top of it.
+//
+// Overlays (help, confirmation, prompt, command bar) do not change activity:
+// the view stays on screen behind them. A view leaving the stack only gets
+// Close, which implies inactive; SetActive is never called after Close.
+//
+// The returned command is tagged like the view's other commands.
+type Activatable interface {
+	SetActive(active bool) tea.Cmd
+}
+
 // Resource is a root view the command bar can switch to.
 type Resource struct {
 	// Name is the command, for example "containers".
