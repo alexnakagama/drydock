@@ -359,6 +359,97 @@ func TestConnectionIndicator(t *testing.T) {
 	}
 }
 
+// sgrParams returns the parameters of the SGR sequence s starts with, or
+// false if it does not start with one.
+func sgrParams(s string) (string, bool) {
+	rest, ok := strings.CutPrefix(s, "\x1b[")
+	if !ok {
+		return "", false
+	}
+	params, _, ok := strings.Cut(rest, "m")
+	return params, ok
+}
+
+// TestHeaderBar checks that the header line is drawn on the bar background
+// across its full width, with no unstyled run, and that its text is what
+// it was before the bar.
+func TestHeaderBar(t *testing.T) {
+	bar, ok := sgrParams(components.Styles.HeaderBar.Render(" "))
+	if !ok || bar == "" {
+		t.Fatalf("HeaderBar renders no SGR sequence: %q", components.Styles.HeaderBar.Render(" "))
+	}
+	h := newHarness(t)
+	h.update(store.ConnectionMsg{State: store.StateConnected})
+	h.press("/")
+	h.typeText("w")
+	h.press("enter") // a filter indicator: [/w]
+	for _, tc := range []struct {
+		width int
+		want  string
+	}{
+		{100, " drydock > containers [/w]" + strings.Repeat(" ", 62) + "● connected "},
+		{36, " drydock > containers […● connected "}, // cut inside the indicator
+		{20, " drydock > contai…● "},                 // compact indicator, breadcrumb cut
+		{3, "…● "},                                   // as before the bar: no room for any breadcrumb
+		{1, "●"},
+	} {
+		h.update(tea.WindowSizeMsg{Width: tc.width, Height: 30})
+		line := strings.SplitN(h.m.render(), "\n", 2)[0]
+		if got := ansi.Strip(line); got != tc.want {
+			t.Errorf("width %d: header %q, want %q", tc.width, got, tc.want)
+		}
+		if w := ansi.StringWidth(line); w != tc.width {
+			t.Errorf("width %d: header is %d cells", tc.width, w)
+		}
+		// Each styled span ends with a reset, so every run between resets
+		// must set the bar background itself.
+		for i, seg := range strings.Split(line, "\x1b[m") {
+			if seg == "" {
+				continue
+			}
+			params, ok := sgrParams(seg)
+			if !ok || !strings.Contains(";"+params+";", ";"+bar+";") {
+				t.Errorf("width %d: header segment %d %q is not on the bar background (%s)", tc.width, i, seg, bar)
+			}
+		}
+	}
+}
+
+// TestRuleBelowTabs checks that the rule under the tab strip is drawn only
+// on terminals of at least minRuleHeight lines, and takes its line from
+// the content area.
+func TestRuleBelowTabs(t *testing.T) {
+	h := newHarness(t)
+	for _, tc := range []struct {
+		height        int
+		rule          bool
+		contentHeight int
+	}{
+		{30, true, 30 - 5},
+		{minRuleHeight, true, minRuleHeight - 5},
+		{minRuleHeight - 1, false, minRuleHeight - 1 - 4},
+	} {
+		h.update(tea.WindowSizeMsg{Width: 80, Height: tc.height})
+		lines := strings.Split(h.m.render(), "\n")
+		if len(lines) != tc.height {
+			t.Fatalf("height %d: screen has %d lines", tc.height, len(lines))
+		}
+		third := ansi.Strip(lines[2])
+		if isRule := third == strings.Repeat("─", 80); isRule != tc.rule {
+			t.Errorf("height %d: third line %q, want rule %v", tc.height, third, tc.rule)
+		}
+		if want := components.Styles.Rule.Render(strings.Repeat("─", 80)); tc.rule && lines[2] != want {
+			t.Errorf("height %d: rule %q, want it in the Rule style %q", tc.height, lines[2], want)
+		}
+		if !tc.rule && !strings.HasPrefix(strings.TrimSpace(third), "NAME") {
+			t.Errorf("height %d: third line %q, want the table header right below the tabs", tc.height, third)
+		}
+		if _, ch := h.m.contentSize(); ch != tc.contentHeight {
+			t.Errorf("height %d: content height %d, want %d", tc.height, ch, tc.contentHeight)
+		}
+	}
+}
+
 func TestResizePreservesSelectionAndFilter(t *testing.T) {
 	h := newHarness(t)
 	h.press("/")
@@ -414,7 +505,7 @@ func TestDrillIntoLogsAndBack(t *testing.T) {
 	if hd := h.header(); !strings.HasPrefix(hd, "drydock > containers > web > logs") {
 		t.Errorf("header %q, want drydock > containers > web > logs", hd)
 	}
-	if want := 30 - baseChromeLines - 1; d.w != 100 || d.h != want {
+	if want := 30 - baseChromeLines - 2; d.w != 100 || d.h != want { // tabs and rule
 		t.Errorf("pushed view sized %dx%d, want 100x%d", d.w, d.h, want)
 	}
 	h.press("esc")
@@ -1512,16 +1603,21 @@ func (h *harness) loaded() {
 func TestTabsShowCounts(t *testing.T) {
 	st := components.Styles
 	h := newHarness(t)
+	// Pills are padded by one cell on each side and joined by one space.
 	before := ansi.Strip(h.tabsLine())
-	if !strings.HasPrefix(before, " 1 containers  2 images  3 volumes ") {
+	if !strings.HasPrefix(before, "  1 containers   2 images   3 volumes  ") {
 		t.Errorf("tabs before the first load %q, want no counts", before)
 	}
 	h.loaded()
+	const loadedTabs = "  1 containers (12)   2 images (34)   3 volumes (5)  "
 	line := h.tabsLine()
+	if plain := ansi.Strip(line); !strings.HasPrefix(plain, loadedTabs) {
+		t.Errorf("tabs %q, want parenthesized counts", plain)
+	}
 	for _, want := range []string{
-		st.TabActive.Render("1 containers 12"),
-		st.Tab.Render("2 images 34"),
-		st.Tab.Render("3 volumes 5"),
+		st.TabPillActive.Render("1 containers (12)"),
+		st.TabPill.Render("2 images (34)"),
+		st.TabPill.Render("3 volumes (5)"),
 	} {
 		if !strings.Contains(line, want) {
 			t.Errorf("tabs %q lack %q", line, want)
@@ -1529,8 +1625,31 @@ func TestTabsShowCounts(t *testing.T) {
 	}
 	h.press("2")
 	line = h.tabsLine()
-	if !strings.Contains(line, st.Tab.Render("1 containers 12")) || !strings.Contains(line, st.TabActive.Render("2 images 34")) {
+	if !strings.Contains(line, st.TabPill.Render("1 containers (12)")) || !strings.Contains(line, st.TabPillActive.Render("2 images (34)")) {
 		t.Errorf("after 2 the images tab is not the highlighted one: %q", line)
+	}
+	// Active and inactive pills are padded alike: switching never moves
+	// the labels.
+	if plain := ansi.Strip(line); !strings.HasPrefix(plain, loadedTabs) {
+		t.Errorf("labels moved when switching tabs: %q", plain)
+	}
+}
+
+func TestTabsCountsNotYetLoaded(t *testing.T) {
+	st := components.Styles
+	h := newHarness(t)
+	line := h.tabsLine()
+	if strings.ContainsAny(ansi.Strip(line), "()") {
+		t.Errorf("tabs %q show counts before the first load", ansi.Strip(line))
+	}
+	for _, want := range []string{
+		st.TabPillActive.Render("1 containers"),
+		st.TabPill.Render("2 images"),
+		st.TabPill.Render("3 volumes"),
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("tabs %q lack %q", ansi.Strip(line), ansi.Strip(want))
+		}
 	}
 }
 
@@ -1540,7 +1659,7 @@ func TestTabsCountIgnoresViewRows(t *testing.T) {
 	h := newHarness(t)
 	h.loaded()
 	plain := ansi.Strip(h.tabsLine())
-	if !strings.Contains(plain, "1 containers 12") || !strings.HasSuffix(plain, " 1/3 ") {
+	if !strings.Contains(plain, "1 containers (12)") || !strings.HasSuffix(plain, " 1/3 ") {
 		t.Errorf("tabs %q, want containers 12 and position 1/3", plain)
 	}
 }
@@ -1554,7 +1673,7 @@ func TestTabsHighlightFollowsRootOfDrillDown(t *testing.T) {
 		t.Fatalf("stack has %d views, want 2", len(h.m.stack))
 	}
 	line := h.tabsLine()
-	if !strings.Contains(line, st.TabActive.Render("2 images 34")) || !strings.Contains(line, st.Tab.Render("1 containers 12")) {
+	if !strings.Contains(line, st.TabPillActive.Render("2 images (34)")) || !strings.Contains(line, st.TabPill.Render("1 containers (12)")) {
 		t.Errorf("tabs %q, want images highlighted after the drill-down", line)
 	}
 	// The detail view on top reports no position.
@@ -1568,25 +1687,34 @@ func TestTabsNarrowUseAliases(t *testing.T) {
 	st := components.Styles
 	h := newHarness(t)
 	h.loaded()
-	// Full labels plus the position need 1+41+1+3+1 = 47 cells.
-	h.update(tea.WindowSizeMsg{Width: 40, Height: 10})
+	// Full pills plus the position need 1+50+1+3+1 = 56 cells, short ones
+	// 1+35+1+3+1 = 41.
+	const width = 48
+	h.update(tea.WindowSizeMsg{Width: width, Height: 10})
 	line := h.tabsLine()
-	for _, want := range []string{st.TabActive.Render("1 co 12"), st.Tab.Render("2 im 34"), st.Tab.Render("3 vol 5")} {
+	if strings.Contains(ansi.Strip(line), "containers") {
+		t.Errorf("narrow tabs %q use the full names", ansi.Strip(line))
+	}
+	for _, want := range []string{st.TabPillActive.Render("1 co (12)"), st.TabPill.Render("2 im (34)"), st.TabPill.Render("3 vol (5)")} {
 		if !strings.Contains(line, want) {
 			t.Errorf("narrow tabs %q lack %q", ansi.Strip(line), ansi.Strip(want))
 		}
 	}
-	if w := ansi.StringWidth(line); w != 40 {
-		t.Errorf("tabs line is %d cells, want 40", w)
+	if w := ansi.StringWidth(line); w != width {
+		t.Errorf("tabs line is %d cells, want %d", w, width)
+	}
+	if plain := ansi.Strip(line); strings.Contains(plain, "…") {
+		t.Errorf("narrow tabs %q are clipped, want the short form in full", plain)
 	}
 
-	// A resource without an alias keeps its name.
+	// A resource without an alias keeps its name. Full pills need
+	// 1+27+1+3+1 = 33 cells with the 0/0 position, short ones 25.
 	m := New([]Resource{
 		{Name: "containers", Aliases: []string{"co"}, New: func(store.Snapshot) View { return newListView("containers") }},
 		{Name: "networks", New: func(store.Snapshot) View { return newListView("networks") }},
 	}, "containers")
-	m.Update(tea.WindowSizeMsg{Width: 22, Height: 10})
-	if got := ansi.Strip(strings.Split(m.render(), "\n")[1]); !strings.HasPrefix(got, " 1 co  2 networks") {
+	m.Update(tea.WindowSizeMsg{Width: 28, Height: 10})
+	if got := ansi.Strip(strings.Split(m.render(), "\n")[1]); !strings.HasPrefix(got, "  1 co   2 networks  ") {
 		t.Errorf("tabs %q, want the alias and the bare name", got)
 	}
 }
@@ -1688,7 +1816,7 @@ func TestShortTerminalHasNoTabs(t *testing.T) {
 
 	h.update(tea.WindowSizeMsg{Width: 80, Height: 5})
 	lines = strings.Split(h.screen(), "\n")
-	if len(lines) != 5 || !strings.Contains(lines[1], "1 containers 12") {
+	if len(lines) != 5 || !strings.Contains(lines[1], "1 containers (12)") {
 		t.Errorf("at height 5 the tab strip is missing:\n%s", h.screen())
 	}
 	if _, ch := h.m.contentSize(); ch != 1 {

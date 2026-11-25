@@ -53,6 +53,8 @@ type StyleSet struct {
 	Dark bool
 
 	// Header and footer.
+	// Every style drawn inside the header line carries the bar background,
+	// because each styled span ends with a full attribute reset.
 	Header       lipgloss.Style
 	HeaderBar    lipgloss.Style // the header line's background, alone
 	Breadcrumb   lipgloss.Style
@@ -65,8 +67,6 @@ type StyleSet struct {
 	FooterDesc   lipgloss.Style
 
 	// Resource tab strip, the rule below it, and list position.
-	TabActive     lipgloss.Style
-	Tab           lipgloss.Style
 	TabPillActive lipgloss.Style // the active tab, as a filled pill
 	TabPill       lipgloss.Style // an inactive tab, padded like TabPillActive
 	Rule          lipgloss.Style
@@ -113,17 +113,15 @@ func NewStyles(dark bool) StyleSet {
 
 		Header:       lipgloss.NewStyle().Bold(true),
 		HeaderBar:    lipgloss.NewStyle().Background(p.bar),
-		Breadcrumb:   lipgloss.NewStyle().Foreground(p.muted),
-		Crumb:        lipgloss.NewStyle().Bold(true).Foreground(p.accent),
-		Indicator:    lipgloss.NewStyle().Foreground(p.warn),
-		Connected:    lipgloss.NewStyle().Foreground(p.success),
-		Connecting:   lipgloss.NewStyle().Foreground(p.warn),
-		Disconnected: lipgloss.NewStyle().Bold(true).Foreground(p.error),
+		Breadcrumb:   lipgloss.NewStyle().Foreground(p.muted).Background(p.bar),
+		Crumb:        lipgloss.NewStyle().Bold(true).Foreground(p.accent).Background(p.bar),
+		Indicator:    lipgloss.NewStyle().Foreground(p.warn).Background(p.bar),
+		Connected:    lipgloss.NewStyle().Foreground(p.success).Background(p.bar),
+		Connecting:   lipgloss.NewStyle().Foreground(p.warn).Background(p.bar),
+		Disconnected: lipgloss.NewStyle().Bold(true).Foreground(p.error).Background(p.bar),
 		FooterKey:    lipgloss.NewStyle().Bold(true).Foreground(p.accent),
 		FooterDesc:   lipgloss.NewStyle().Foreground(p.muted),
 
-		TabActive:     lipgloss.NewStyle().Bold(true).Foreground(p.accent),
-		Tab:           lipgloss.NewStyle().Foreground(p.muted),
 		TabPillActive: lipgloss.NewStyle().Bold(true).Foreground(p.onAccent).Background(p.accent).Padding(0, 1),
 		TabPill:       lipgloss.NewStyle().Foreground(p.muted).Padding(0, 1),
 		Rule:          lipgloss.NewStyle().Foreground(p.muted),

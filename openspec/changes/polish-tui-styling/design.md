@@ -43,6 +43,7 @@ The light palette uses darker shades of the same hues: blue, green, red, orange,
 
 - **Header bar:** the header line is drawn on a bar background across the full width. Lipgloss resets all attributes at the end of each styled span, so every style used inside the header (`Breadcrumb`, `Crumb`, `Indicator`, connection states) is built with the bar background as well. Today `headerView` returns `Fit(" "+left, gap) + right + " "`, where the leading and trailing spaces and `Fit`'s padding are unstyled. Those become spans in a `HeaderBar` style, which is the bar background alone. Doing it with a single outer style would leave holes after each inner span.
 - **Rule line:** a single muted `─` rule goes under the tab strip. It is drawn only when the terminal is at least `minRuleHeight` (12) lines tall, and `chromeLines()` counts it. Terminals shorter than 12 lines (the 100x8 and 100x10 goldens) keep all their list rows. Goldens of 12 or more lines lose one content row to the rule. For example, `images_all_100x12` drops from 7 to 6 visible rows, which is expected.
+- **Overlays may cover the rule:** dialogs are centred over the rule and the content area together. The rule is decoration only, and without this the help overlay (20 lines for the containers view) would lose its bottom border at 80x24, where the content area is now 19 lines.
 - **No rule above the footer:** the status line already sits between the list and the footer and does that job.
 
 ### 3. Tab pills
