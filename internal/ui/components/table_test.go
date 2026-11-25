@@ -1,12 +1,15 @@
 package components
 
 import (
+	"fmt"
+	"image/color"
 	"math/rand/v2"
 	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/alexnakagama/drydock/internal/ui/uitest"
@@ -296,6 +299,256 @@ func TestDialogViewsFitWidth(t *testing.T) {
 			if lw := ansi.StringWidth(l); lw > max(w, dialogChrome+1) {
 				t.Errorf("width %d: prompt line %d cells wide", w, lw)
 			}
+		}
+	}
+}
+
+// withStyles sets the package-global Styles to st for the rest of the test.
+func withStyles(t *testing.T, st StyleSet) {
+	t.Helper()
+	old := Styles
+	t.Cleanup(func() { Styles = old })
+	Styles = st
+}
+
+// dialogLines returns the dialog's lines and checks that they all have the
+// same width, which it returns.
+func dialogLines(t *testing.T, v string) ([]string, int) {
+	t.Helper()
+	lines := strings.Split(v, "\n")
+	w := ansi.StringWidth(lines[0])
+	for i, l := range lines {
+		if lw := ansi.StringWidth(l); lw != w {
+			t.Fatalf("line %d is %d cells wide, line 0 is %d:\n%s", i, lw, w, ansi.Strip(v))
+		}
+	}
+	return lines, w
+}
+
+func TestDialogWidth(t *testing.T) {
+	cases := []struct{ content, maxWidth, want int }{
+		{0, 200, minDialogWidth - dialogChrome},
+		{10, 200, minDialogWidth - dialogChrome},
+		{45, 200, 45},
+		{maxDialogWidth - dialogChrome, 200, maxDialogWidth - dialogChrome},
+		{90, 200, maxDialogWidth - dialogChrome},
+		{90, 30, 30 - dialogChrome},
+		{10, 30, 30 - dialogChrome},
+		{10, dialogChrome, 1},
+		{10, 0, 1},
+		{10, -5, 1},
+	}
+	for _, c := range cases {
+		if got := dialogWidth(c.content, c.maxWidth); got != c.want {
+			t.Errorf("dialogWidth(%d, %d) = %d, want %d", c.content, c.maxWidth, got, c.want)
+		}
+	}
+}
+
+func TestConfirmFitsContent(t *testing.T) {
+	// Short content: the minimum width, not the terminal's.
+	_, w := dialogLines(t, NewConfirm("Delete container?", "web").View(80))
+	if w != minDialogWidth {
+		t.Errorf("short confirmation is %d cells wide, want %d", w, minDialogWidth)
+	}
+
+	// A long body line caps the width and is truncated with an ellipsis.
+	ref := "registry.example.com/team/" + strings.Repeat("a", 90-len("registry.example.com/team/"))
+	lines, w := dialogLines(t, NewConfirm("Delete image?", ref).View(120))
+	if w != maxDialogWidth {
+		t.Errorf("long confirmation is %d cells wide, want %d", w, maxDialogWidth)
+	}
+	var shown string
+	for _, l := range lines {
+		if s := ansi.Strip(l); strings.Contains(s, "registry.example.com") {
+			shown = s
+		}
+	}
+	if !strings.Contains(shown, "…") || strings.Contains(shown, ref) {
+		t.Errorf("long reference not truncated with an ellipsis: %q", shown)
+	}
+
+	// Content between the bounds sets the width exactly.
+	mid := strings.Repeat("m", 45)
+	if _, w := dialogLines(t, NewConfirm("Delete?", mid).View(120)); w != 45+dialogChrome {
+		t.Errorf("confirmation with a 45-cell line is %d cells wide, want %d", w, 45+dialogChrome)
+	}
+
+	// Narrow terminal: fits in it.
+	if _, w := dialogLines(t, NewConfirm("Delete image?", ref).View(30)); w > 30 {
+		t.Errorf("confirmation on a 30-column terminal is %d cells wide", w)
+	}
+
+	// Only the shown body lines are measured: a long line past the cap
+	// does not widen the dialog.
+	body := make([]string, maxConfirmLines+5)
+	for i := range body {
+		body[i] = "c" + itoa(i)
+	}
+	body[len(body)-1] = strings.Repeat("z", 90)
+	if _, w := dialogLines(t, NewConfirm("Delete containers?", body...).View(120)); w != minDialogWidth {
+		t.Errorf("hidden long body line widened the dialog to %d cells", w)
+	}
+}
+
+func TestConfirmWrapsProse(t *testing.T) {
+	sentence := "Volume cache-data (local driver) and all its data will be removed."
+	v := NewConfirm("Delete volume cache-data?", sentence, "Its volumes are kept.").View(80)
+	lines, w := dialogLines(t, v)
+	if w != maxDialogWidth {
+		t.Errorf("dialog is %d cells wide, want %d", w, maxDialogWidth)
+	}
+	text := ansi.Strip(v)
+	if strings.Contains(text, "…") {
+		t.Errorf("prose truncated instead of wrapped:\n%s", text)
+	}
+	// Rejoin the wrapped words: the whole sentence must be there.
+	var words []string
+	for _, l := range lines {
+		words = append(words, strings.Fields(strings.Trim(ansi.Strip(l), "│╭╮╰╯─ "))...)
+	}
+	if !strings.Contains(strings.Join(words, " "), sentence) {
+		t.Errorf("sentence not shown in full:\n%s", text)
+	}
+}
+
+func TestConfirmBodyCap(t *testing.T) {
+	long := strings.Repeat("word ", 30) // wraps to several lines
+	tests := []struct {
+		name     string
+		body     []string
+		wantMore string // the last body line, or "" when nothing is left out
+	}{
+		{"fits", []string{"a", "b", "c"}, ""},
+		{"exactly the cap", slices.Repeat([]string{"x"}, maxConfirmLines), ""},
+		{"one entry over", slices.Repeat([]string{"x"}, maxConfirmLines+1), "… and 2 more"},
+		{"many entries", slices.Repeat([]string{"x"}, 30), "… and 19 more"},
+		{"wrapped entries", slices.Repeat([]string{long}, 5), "… and 3 more"},
+		{"one huge entry", []string{strings.Repeat(long, 5)}, "… and 1 more"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shown := tt.body[:min(len(tt.body), maxConfirmLines)]
+			got := confirmBody(shown, len(tt.body), 36)
+			if len(got) > maxConfirmLines {
+				t.Fatalf("%d body lines, want at most %d", len(got), maxConfirmLines)
+			}
+			for i, l := range got {
+				if lw := ansi.StringWidth(l); lw > 36 {
+					t.Errorf("line %d is %d cells wide", i, lw)
+				}
+			}
+			last := got[len(got)-1]
+			if tt.wantMore == "" {
+				if strings.HasPrefix(last, "… and") {
+					t.Errorf("unexpected summary %q", last)
+				}
+				return
+			}
+			if last != tt.wantMore {
+				t.Errorf("last line %q, want %q", last, tt.wantMore)
+			}
+		})
+	}
+}
+
+func TestPromptFitsContent(t *testing.T) {
+	p, _ := NewPrompt("Volume name", "empty for a generated name")
+	p.SetMaxWidth(80)
+	if _, w := dialogLines(t, p.View(80)); w != minDialogWidth {
+		t.Errorf("short prompt is %d cells wide, want %d", w, minDialogWidth)
+	}
+
+	p, _ = NewPrompt("Image to pull", strings.Repeat("p", 90))
+	p.SetMaxWidth(120)
+	if _, w := dialogLines(t, p.View(120)); w != maxDialogWidth {
+		t.Errorf("prompt with a long placeholder is %d cells wide, want %d", w, maxDialogWidth)
+	}
+	p.SetMaxWidth(30)
+	if _, w := dialogLines(t, p.View(30)); w > 30 {
+		t.Errorf("prompt on a 30-column terminal is %d cells wide", w)
+	}
+}
+
+// numbered returns n comma-terminated two-digit numbers, a text in which
+// every run of three or more characters occurs once.
+func numbered(n int) string {
+	var b strings.Builder
+	for i := range n {
+		fmt.Fprintf(&b, "%02d,", i)
+	}
+	return b.String()
+}
+
+// checkPromptWindow checks that the prompt dialog v keeps its typed text on
+// one input line that shows a contiguous part of typed around the cursor
+// at pos, neither wrapped nor cut with an ellipsis.
+func checkPromptWindow(t *testing.T, v, typed string, pos, maxWidth int) {
+	t.Helper()
+	lines, w := dialogLines(t, v)
+	if len(lines) != 7 {
+		t.Fatalf("width %d: prompt has %d lines, want 7 (typed text wrapped?):\n%s", maxWidth, len(lines), ansi.Strip(v))
+	}
+	if w > maxWidth {
+		t.Errorf("width %d: prompt is %d cells wide", maxWidth, w)
+	}
+	in := strings.Trim(ansi.Strip(lines[3]), "│ ")
+	shown, ok := strings.CutPrefix(in, "> ")
+	start := strings.Index(typed, shown)
+	if !ok || shown == "" || start < 0 {
+		t.Fatalf("width %d: input line %q is not a part of the typed text", maxWidth, in)
+	}
+	if pos < start || pos > start+len(shown) {
+		t.Errorf("width %d: cursor %d outside the shown text [%d, %d)", maxWidth, pos, start, start+len(shown))
+	}
+}
+
+func TestPromptScrollsTypedText(t *testing.T) {
+	p, _ := NewPrompt("Volume name", "")
+	p.SetMaxWidth(80)
+	typed := numbered(30)
+	for _, r := range typed {
+		p, _, _ = p.Update(uitest.KeyPress(string(r)))
+	}
+	checkPromptWindow(t, p.View(80), typed, len(typed), 80)
+	// Move the cursor back into the middle, then shrink and widen the
+	// terminal: the text must still scroll, with the cursor in view.
+	for range 43 {
+		p, _, _ = p.Update(uitest.KeyPress("left"))
+	}
+	pos := len(typed) - 43
+	for _, maxWidth := range []int{80, 30, 100} {
+		p.SetMaxWidth(maxWidth)
+		checkPromptWindow(t, p.View(maxWidth), typed, pos, maxWidth)
+	}
+	if p.Value() != typed {
+		t.Errorf("value %q, want %q", p.Value(), typed)
+	}
+}
+
+func TestDialogBorderColors(t *testing.T) {
+	for _, dark := range []bool{true, false} {
+		withStyles(t, NewStyles(dark))
+		pal := lightPalette
+		if dark {
+			pal = darkPalette
+		}
+		// The SGR sequence that colors the top-left border corner, followed
+		// by the corner itself.
+		corner := func(c color.Color) string {
+			sgr, _, _ := strings.Cut(lipgloss.NewStyle().Foreground(c).Render("╭"), "╭")
+			return sgr + "╭"
+		}
+		first := func(v string) string { return strings.SplitN(v, "\n", 2)[0] }
+
+		c := first(NewConfirm("Delete web?", "web").View(80))
+		if !strings.HasPrefix(c, corner(pal.error)) {
+			t.Errorf("dark=%v: confirm border not in the error color: %q", dark, c)
+		}
+		p, _ := NewPrompt("Image to pull", "nginx:latest")
+		pv := first(p.View(80))
+		if !strings.HasPrefix(pv, corner(pal.accent)) {
+			t.Errorf("dark=%v: prompt border not in the accent color: %q", dark, pv)
 		}
 	}
 }
@@ -850,4 +1103,141 @@ func TestTableEmptyMessagesSanitized(t *testing.T) {
 	check("no-match while typing", &tb)
 	press(t, &tb, "enter")
 	check("no-match", &tb)
+}
+
+// TestDialogsSanitizeUntrustedText checks that text from the engine (names
+// in titles and bodies) cannot inject escape sequences, bidi overrides or
+// line breaks through a dialog, and that the dialog stays rectangular.
+func TestDialogsSanitizeUntrustedText(t *testing.T) {
+	hostile := "x\x1b]0;pwned\x07y\x1b[31mz\u202eevil\r\nnext\tcol\x9b2J"
+	check := func(t *testing.T, name, v string, maxWidth int) {
+		t.Helper()
+		for _, bad := range []string{"\x1b]", "\x07", "\u202e", "\x1b[31m", "\x1b[2J", "\x9b", "\r", "\t", "pwned\x07"} {
+			if strings.Contains(v, bad) {
+				t.Errorf("%s: output contains %q", name, bad)
+			}
+		}
+		if _, w := dialogLines(t, v); w > maxWidth {
+			t.Errorf("%s: %d cells wide on a %d-column terminal", name, w, maxWidth)
+		}
+	}
+	for _, w := range []int{80, 30} {
+		long := strings.Repeat(hostile+" ", 10)
+		check(t, "confirm", NewConfirm("Delete "+hostile+"?", hostile, long).View(w), w)
+		p, _ := NewPrompt("Pull "+hostile, hostile)
+		p.SetMaxWidth(w)
+		check(t, "prompt", p.View(w), w)
+	}
+}
+
+// TestDialogsWideRunes checks the width math with double-width runes: every
+// line has the same width, within the limits.
+func TestDialogsWideRunes(t *testing.T) {
+	for _, w := range []int{80, 31, 30} {
+		v := NewConfirm("削除しますか 日本語のコンテナ名?", strings.Repeat("日本", 40), "ボリューム は 保持 されます "+strings.Repeat("語", 50)).View(w)
+		if _, dw := dialogLines(t, v); dw > min(w, maxDialogWidth) {
+			t.Errorf("width %d: confirm is %d cells wide", w, dw)
+		}
+		p, _ := NewPrompt("イメージ名", "例 nginx")
+		p.SetMaxWidth(w)
+		for _, r := range strings.Repeat("日本語", 20) {
+			p, _, _ = p.Update(uitest.KeyPress(string(r)))
+		}
+		lines, dw := dialogLines(t, p.View(w))
+		if len(lines) != 7 || dw > w {
+			t.Errorf("width %d: prompt has %d lines, %d cells wide:\n%s", w, len(lines), dw, ansi.Strip(p.View(w)))
+		}
+	}
+}
+
+func TestTruncateMiddle(t *testing.T) {
+	cases := []struct {
+		s     string
+		width int
+		want  string
+	}{
+		{"short", 10, "short"},
+		{"exactly10!", 10, "exactly10!"},
+		{"abcdefghijkl", 7, "abc…jkl"},
+		{"abcdefghijkl", 8, "abcd…jkl"},
+		{"abcdefghijkl", 2, "a…"},
+		{"abcdefghijkl", 0, ""},
+	}
+	for _, c := range cases {
+		if got := TruncateMiddle(c.s, c.width); got != c.want {
+			t.Errorf("TruncateMiddle(%q, %d) = %q, want %q", c.s, c.width, got, c.want)
+		}
+	}
+	for w := 3; w < 20; w++ {
+		if got := TruncateMiddle(strings.Repeat("日本", 20), w); ansi.StringWidth(got) > w {
+			t.Errorf("wide runes at width %d: %q is %d cells", w, got, ansi.StringWidth(got))
+		}
+	}
+}
+
+// TestConfirmKeepsDistinguishingEnds checks that two long names differing
+// only at the end stay distinguishable in their confirmation dialogs.
+func TestConfirmKeepsDistinguishingEnds(t *testing.T) {
+	prefix := strings.Repeat("shared_prefix_", 6) // no spaces or hyphens to wrap at
+	a, b := prefix+"alpha", prefix+"bravo"
+	va := ansi.Strip(NewConfirm("Delete volume "+a+"?", a).View(80))
+	vb := ansi.Strip(NewConfirm("Delete volume "+b+"?", b).View(80))
+	if va == vb {
+		t.Fatalf("dialogs for %q and %q render the same:\n%s", a, b, va)
+	}
+	if !strings.Contains(va, "alpha") || !strings.Contains(vb, "bravo") {
+		t.Errorf("name ends not shown:\n%s\n%s", va, vb)
+	}
+}
+
+func TestConfirmTitleWraps(t *testing.T) {
+	v := NewConfirm("Delete image registry.example.com/team/service:1.2.3 now?", "x").View(80)
+	lines, _ := dialogLines(t, v)
+	title := strings.TrimSpace(strings.Trim(ansi.Strip(lines[1]), "│")) + " " +
+		strings.TrimSpace(strings.Trim(ansi.Strip(lines[2]), "│"))
+	if title != "Delete image registry.example.com/team/service:1.2.3 now?" {
+		t.Errorf("title not wrapped in full over two lines:\n%s", ansi.Strip(v))
+	}
+
+	// Past two lines, the title is cut with an ellipsis.
+	long := strings.TrimSpace(strings.Repeat("word ", 40))
+	got := confirmTitle(long, 36)
+	if len(got) != maxConfirmTitleLines || !strings.HasSuffix(got[1], "…") {
+		t.Errorf("long title gave %q, want %d lines ending in …", got, maxConfirmTitleLines)
+	}
+	for _, l := range got {
+		if ansi.StringWidth(l) > 36 {
+			t.Errorf("title line %q wider than 36", l)
+		}
+	}
+}
+
+// TestConfirmViewCapsWrappedBody checks the line cap through View, where
+// the width comes from the content: long wrapped entries end in the count
+// of what is left out, with the hint still shown.
+func TestConfirmViewCapsWrappedBody(t *testing.T) {
+	entry := strings.TrimSpace(strings.Repeat("container-name ", 10)) // 149 cells, 3 lines at 56
+	v := NewConfirm("Delete containers?", slices.Repeat([]string{entry}, 8)...).View(80)
+	lines, w := dialogLines(t, v)
+	if w != maxDialogWidth {
+		t.Errorf("dialog is %d cells wide, want %d", w, maxDialogWidth)
+	}
+	// border + title + blank + body + blank + hint + border
+	if body := len(lines) - 6; body != maxConfirmLines {
+		t.Errorf("%d body lines, want %d:\n%s", body, maxConfirmLines, ansi.Strip(v))
+	}
+	strip := func(i int) string { return strings.TrimSpace(strings.Trim(ansi.Strip(lines[i]), "│")) }
+	if got := strip(len(lines) - 4); got != "… and 5 more" {
+		t.Errorf("last body line %q, want %q", got, "… and 5 more")
+	}
+	if got := strip(len(lines) - 2); got != confirmHint {
+		t.Errorf("hint line %q, want %q", got, confirmHint)
+	}
+}
+
+func TestPromptPlaceholderCleaned(t *testing.T) {
+	p, _ := NewPrompt("t", "a\x1b[31mb\u202ec")
+	if v := p.View(80); strings.Contains(v, "\x1b[31m") || strings.Contains(v, "\u202e") {
+		t.Errorf("placeholder rendered raw: %q", v)
+	}
 }

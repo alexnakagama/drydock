@@ -241,10 +241,10 @@ func TestDeleteInUseTagKeptByOtherRepositoryDigest(t *testing.T) {
 	e.selectImage("app:1")
 	e.press("d")
 	e.settle()
-	s := e.screen()
-	if !strings.Contains(s, "Only the tag app:1 is removed.") ||
-		!strings.Contains(s, "The image stays referenced as mirror.local/app@222222222222.") || strings.Contains(s, "refuse") {
-		t.Errorf("confirmation:\n%s", s)
+	d := e.dialogText()
+	if !strings.Contains(d, "Only the tag app:1 is removed.") ||
+		!strings.Contains(d, "The image stays referenced as mirror.local/app@222222222222.") || strings.Contains(d, "refuse") {
+		t.Errorf("confirmation:\n%s", e.screen())
 	}
 }
 

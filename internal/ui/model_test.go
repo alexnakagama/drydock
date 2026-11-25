@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"image/color"
 	"os"
 	"path/filepath"
@@ -1790,5 +1791,45 @@ func TestHelpListsSwitchKeysOnce(t *testing.T) {
 	}
 	if !strings.Contains(s, "? or esc to close") {
 		t.Errorf("help lacks the close hint:\n%s", s)
+	}
+}
+
+// TestPromptScrollsAtTerminalWidth checks that the root sizes an open
+// prompt's input for the terminal, when it opens and on resize, so long
+// typed text scrolls inside the dialog instead of wrapping or being cut,
+// with the cursor kept in view.
+func TestPromptScrollsAtTerminalWidth(t *testing.T) {
+	var b strings.Builder
+	for i := range 30 {
+		fmt.Fprintf(&b, "%02d,", i) // every 3-character run occurs once
+	}
+	typed := b.String()
+	h := newHarness(t)
+	h.send(Prompt("Volume name", "name", nil))
+	h.typeText(typed)
+	for range 43 {
+		h.press("left")
+	}
+	pos := len(typed) - 43
+	for _, w := range []int{80, 30} {
+		h.update(tea.WindowSizeMsg{Width: w, Height: 24})
+		d := strings.Split(ansi.Strip(h.m.overlayView()), "\n")
+		if len(d) != 7 {
+			t.Fatalf("width %d: prompt has %d lines, want 7 (typed text wrapped?):\n%s", w, len(d), strings.Join(d, "\n"))
+		}
+		for i, l := range d {
+			if lw := ansi.StringWidth(l); lw > w {
+				t.Errorf("width %d: prompt line %d is %d cells wide", w, i, lw)
+			}
+		}
+		in := strings.Trim(d[3], "│ ")
+		shown, ok := strings.CutPrefix(in, "> ")
+		start := strings.Index(typed, shown)
+		if !ok || shown == "" || start < 0 {
+			t.Fatalf("width %d: input line %q is not a part of the typed text", w, in)
+		}
+		if pos < start || pos > start+len(shown) {
+			t.Errorf("width %d: cursor %d outside the shown text [%d, %d)", w, pos, start, start+len(shown))
+		}
 	}
 }

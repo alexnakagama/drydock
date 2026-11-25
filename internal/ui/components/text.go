@@ -75,6 +75,28 @@ func Truncate(s string, width int) string {
 	return s
 }
 
+// TruncateMiddle shortens s to at most width cells by replacing its middle
+// with "…", keeping its start and its end, which is where similar names
+// (versioned image references, generated volume names) usually differ. s
+// must hold no escape sequences (see Clean).
+func TruncateMiddle(s string, width int) string {
+	sw := ansi.StringWidth(s)
+	if sw <= width {
+		return s
+	}
+	if width < 3 {
+		return Truncate(s, width)
+	}
+	tail := (width - 1) / 2
+	head := width - 1 - tail
+	out := ansi.Truncate(s, head, "") + "…" + ansi.TruncateLeft(s, sw-tail, "")
+	// A wide rune split at either cut can leave the result a cell over.
+	if ansi.StringWidth(out) > width {
+		return Truncate(s, width)
+	}
+	return out
+}
+
 // NewInput returns a single-line text input with drydock's styling and
 // length limit, showing prompt before the text. It is not focused.
 func NewInput(prompt, placeholder string) textinput.Model {

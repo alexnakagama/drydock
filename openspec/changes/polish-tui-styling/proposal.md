@@ -25,7 +25,7 @@ None.
 
 ### Modified Capabilities
 
-- `tui-navigation`: the "Resource tab strip" requirement changes how the count is displayed next to the resource name. The "Confirmation for destructive actions" requirement adds a distinct destructive style. New requirements cover content-fitted list columns, the selected-row marker, container state glyphs (shown on the selected row too), content-sized dialogs, the centered empty-list message, the rule below the tab strip, and the adaptive palette. "State-colored rows" is unchanged.
+- `tui-navigation`: the "Resource tab strip" requirement changes how the count is displayed next to the resource name. The "Confirmation for destructive actions" requirement adds a distinct destructive style. New requirements cover content-fitted list columns, the selected-row marker, container state glyphs (shown on the selected row too), content-sized dialogs, confirmation text that wraps instead of being cut off, the centered empty-list message, the rule below the tab strip, and the adaptive palette. "State-colored rows" is unchanged.
 
 ## Impact
 

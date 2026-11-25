@@ -315,9 +315,8 @@ func TestDeleteUnusedVolume(t *testing.T) {
 	e.selectVolume("cache-data")
 	e.press("d")
 	e.settle()
-	s := e.screen()
-	if !strings.Contains(s, "Delete volume cache-data?") || !strings.Contains(s, "Volume cache-data (local driver) and all its data will be removed.") {
-		t.Fatalf("confirmation:\n%s", s)
+	if d := e.dialogText(); !strings.Contains(d, "Delete volume cache-data?") || !strings.Contains(d, "Volume cache-data (local driver) and all its data will be removed.") {
+		t.Fatalf("confirmation:\n%s", e.screen())
 	}
 	e.press("y")
 	e.waitStatus("delete volume cache-data: done")
@@ -408,7 +407,10 @@ func TestPruneUnusedVolumes(t *testing.T) {
 	if !strings.Contains(s, "Prune unused volumes?") || !strings.Contains(s, "3 unused volumes and all their data will be removed:") {
 		t.Fatalf("confirmation:\n%s", s)
 	}
-	for _, want := range []string{"cache-data", "tmp1", anonVolume[:40]} {
+	// The anonymous volume's name is too long for the dialog: it is
+	// shortened in the middle, keeping both ends.
+	anon := anonVolume[:20] + "…"
+	for _, want := range []string{"cache-data", "tmp1", anon, anonVolume[len(anonVolume)-20:]} {
 		if !strings.Contains(s, want) {
 			t.Errorf("confirmation lacks %q:\n%s", want, s)
 		}
@@ -745,3 +747,7 @@ func (e *env) dialog() string {
 	}
 	return strings.Join(out, "\n")
 }
+
+// dialogText returns the text inside the open dialog's border as one line,
+// with runs of spaces collapsed, so text the dialog wraps can be matched.
+func (e *env) dialogText() string { return strings.Join(strings.Fields(e.dialog()), " ") }

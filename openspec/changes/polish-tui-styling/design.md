@@ -88,8 +88,8 @@ Alternatives considered:
 
 `dialogInner(maxWidth, preferred)` becomes `dialogWidth(content, maxWidth int) int`. It clamps `content + dialogChrome` to [40, 60] and then to `maxWidth`. It returns the inner width.
 
-- **`Confirm`:** measures the widest of its cleaned title, its body lines (before truncation) and the hint.
-- **`Prompt`:** measures its title, hint and placeholder. Typed text scrolls inside the input, as it does now.
+- **`Confirm`:** measures the widest of its cleaned title, the body entries that can be shown (the first `maxConfirmLines`) and the hint. Body entries wrap at spaces to the dialog width, so a sentence describing what a destructive action does is never cut off by the 60-cell cap; the title wraps too, over at most two lines. A single word wider than the dialog, such as a long image reference or a generated volume name, is shortened in the middle with `…` (`TruncateMiddle`), keeping both ends, so names that differ only at the end can be told apart before confirming. All shown text is `Clean`ed once, before it is measured and wrapped; the prompt's placeholder is cleaned in `NewPrompt` as well. `maxConfirmLines` now bounds wrapped lines, and its `… and N more` line counts the entries left out or shown only in part.
+- **`Prompt`:** measures its title, hint and the input's prompt plus placeholder. Typed text scrolls inside the input. Previously the input's width was set only on the copy rendered in `View`, so `Update` scrolled against a zero width and long text wrapped. `Prompt.SetMaxWidth` sizes the input, and the root model calls it when the prompt opens and on every resize.
 
 A new `ConfirmDialog` style is `Dialog` with an error-colored border, and only `Confirm` uses it. The help overlay keeps `Dialog` and its current content sizing.
 
