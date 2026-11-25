@@ -6,13 +6,13 @@
   worker        alpine                                              Exited (0)  
                                                                                 
                                                                                 
-   ╭────────────────────────────────────────────────────────────────────────╮   
-   │ Delete web?                                                            │   
-   │                                                                        │   
-   │ This cannot be undone.                                                 │   
-   │                                                                        │   
-   │ y confirm · any other key cancels                                      │   
-   ╰────────────────────────────────────────────────────────────────────────╯   
+                    ╭──────────────────────────────────────╮                    
+                    │ Delete web?                          │                    
+                    │                                      │                    
+                    │ This cannot be undone.               │                    
+                    │                                      │                    
+                    │ y confirm · any other key cancels    │                    
+                    ╰──────────────────────────────────────╯                    
                                                                                 
                                                                                 
                                                                                 

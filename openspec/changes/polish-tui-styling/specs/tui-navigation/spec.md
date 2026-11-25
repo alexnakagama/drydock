@@ -96,7 +96,7 @@ The containers view SHALL begin each STATUS cell with a glyph for the container'
 - **THEN** its STATUS cell begins with a blank in place of a glyph
 
 ### Requirement: Dialogs fit their content
-Confirmation and prompt dialogs SHALL be only as wide as their content, but no narrower than 40 cells and no wider than 60 cells, border included. They SHALL never be wider than the terminal. Content wider than the dialog SHALL be truncated as before.
+Confirmation and prompt dialogs SHALL be only as wide as their content, but no narrower than 40 cells and no wider than 60 cells, border included. They SHALL never be wider than the terminal. A prompt's title wider than the dialog SHALL be truncated with an ellipsis.
 
 #### Scenario: Short confirmation
 - **WHEN** the user requests deletion of container `web` on an 80-column terminal
@@ -109,6 +109,17 @@ Confirmation and prompt dialogs SHALL be only as wide as their content, but no n
 #### Scenario: Narrow terminal
 - **WHEN** the terminal is 30 columns wide
 - **THEN** the dialog fits within 30 columns
+
+### Requirement: Confirmation text is never cut off
+A confirmation's title and body text wider than the dialog SHALL wrap at spaces, so the description of a destructive action and what it affects are not cut off. The title SHALL take at most two lines, with the rest cut with an ellipsis. A single word wider than the dialog SHALL be shortened in the middle with an ellipsis, keeping its start and end.
+
+#### Scenario: Long sentence wraps
+- **WHEN** the confirmation for deleting volume `cache-data` says `Volume cache-data (local driver) and all its data will be removed.` on an 80-column terminal
+- **THEN** the dialog is 60 cells wide and the sentence is shown in full, wrapped across lines
+
+#### Scenario: Similar long names stay distinguishable
+- **WHEN** the confirmations for deleting two volumes whose names are wider than the dialog and differ only in their last characters are shown
+- **THEN** each dialog shows the end of its volume's name
 
 ### Requirement: Centered empty-list message
 When a resource list view has no rows to list, it SHALL show its empty-list message, including any hint such as how to show all containers, centered in the list area below the column headers.

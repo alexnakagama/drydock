@@ -200,6 +200,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = max(msg.Width, 0), max(msg.Height, 0)
 		m.command.SetWidth(max(m.width-2, 1))
+		if m.overlay == overlayPrompt {
+			m.prompt.SetMaxWidth(m.width)
+		}
 		for _, e := range m.stack {
 			e.view.SetSize(m.contentSize())
 		}
@@ -263,6 +266,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.overlay, m.dialogOf = overlayPrompt, msg.origin
 		var cmd tea.Cmd
 		m.prompt, cmd = components.NewPrompt(msg.title, msg.placeholder)
+		m.prompt.SetMaxWidth(m.width)
 		m.onSubmit = msg.onSubmit
 		return m, cmd
 	case foregroundMsg:

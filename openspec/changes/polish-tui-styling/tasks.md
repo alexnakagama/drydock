@@ -20,8 +20,8 @@
 
 ## 4. Content-sized dialogs
 
-- [ ] 4.1 In `internal/ui/components/prompt.go`, replace `dialogInner` with `dialogWidth(content, maxWidth)`, which clamps the total width to [40, 60] and then to the terminal width. `Confirm` measures its title, body lines and hint; `Prompt` measures its title, hint and placeholder. `Confirm` renders with `ConfirmDialog`, while `Prompt` and the help overlay keep `Dialog`. Verify with new cases in `internal/ui/components/table_test.go`, next to `TestDialogViewsFitWidth`: a short confirmation is 40 cells wide; a 90-cell body line caps the dialog at 60 cells and is shown truncated with `…`; on a 30-column terminal the dialog fits in 30 cells; `Confirm`'s border uses the error color and `Prompt`'s the accent color. `TestDialogViewsFitWidth` must still pass.
-- [ ] 4.2 Regenerate `internal/ui/testdata/confirm_80x24.golden`, check that the dialog is now 40 cells wide and centered, and confirm `go test ./internal/ui/...` passes.
+- [x] 4.1 In `internal/ui/components/prompt.go`, replace `dialogInner` with `dialogWidth(content, maxWidth)`, which clamps the total width to [40, 60] and then to the terminal width. `Confirm` measures its title, body lines and hint; `Prompt` measures its title, hint and placeholder. `Confirm` renders with `ConfirmDialog`, while `Prompt` and the help overlay keep `Dialog`. Verify with new cases in `internal/ui/components/table_test.go`, next to `TestDialogViewsFitWidth`: a short confirmation is 40 cells wide; a 90-cell body line caps the dialog at 60 cells and is shown truncated with `…`; on a 30-column terminal the dialog fits in 30 cells; `Confirm`'s border uses the error color and `Prompt`'s the accent color. `TestDialogViewsFitWidth` must still pass.
+- [x] 4.2 Regenerate `internal/ui/testdata/confirm_80x24.golden`, check that the dialog is now 40 cells wide and centered, and confirm `go test ./internal/ui/...` passes.
 
 ## 5. Screen chrome: header bar, tab pills, rule
 
