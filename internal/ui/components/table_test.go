@@ -1254,3 +1254,288 @@ func TestTableWhitespaceFilterShowsEmptyText(t *testing.T) {
 		t.Errorf("a whitespace-only filter is not applied, want the empty-list message:\n%s", v)
 	}
 }
+
+// Column sets for the SetColumns tests: four columns, and five where a new
+// column takes the last one's place and NAME is no longer filtered.
+var (
+	fourCols = []Column{
+		{Title: "NAME", Width: 8, Flex: true, Filter: true},
+		{Title: "IMAGE", Width: 8, Flex: true, Filter: true},
+		{Title: "STATUS", Width: 8},
+		{Title: "PORTS", Width: 8, Flex: true},
+	}
+	fiveCols = []Column{
+		{Title: "NAME", Width: 8, Flex: true},
+		{Title: "IMAGE", Width: 8, Flex: true, Filter: true},
+		{Title: "STATUS", Width: 8},
+		{Title: "CPU", Width: 6},
+		{Title: "MEM", Width: 10, Flex: true, Filter: true},
+	}
+)
+
+func rowsFor(cols []Column, n int) []Row {
+	rows := make([]Row, n)
+	for i := range rows {
+		cells := make([]string, len(cols))
+		for c, col := range cols {
+			cells[c] = fmt.Sprintf("%s-%d", strings.ToLower(col.Title), i)
+		}
+		rows[i] = Row{Key: fmt.Sprintf("k%d", i), Cells: cells}
+	}
+	return rows
+}
+
+func checkTableLines(t *testing.T, tb *Table, width, height int) {
+	t.Helper()
+	lines := strings.Split(tb.View(), "\n")
+	if len(lines) != height {
+		t.Fatalf("view has %d lines, want %d", len(lines), height)
+	}
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w != width {
+			t.Errorf("line %d is %d cells wide, want %d: %q", i, w, width, ansi.Strip(l))
+		}
+	}
+}
+
+func TestTableSetColumns(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		from, to []Column
+	}{
+		{"4 to 5", fourCols, fiveCols},
+		{"5 to 4", fiveCols, fourCols},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const width, height = 70, 6
+			tb := NewTable(tc.from)
+			tb.SetSize(width, height)
+			tb.SetRows(rowsFor(tc.from, 20))
+			press(t, &tb, "G", "k", "k") // k17, scrolled down
+			wantOffset := tb.offset
+			if wantOffset == 0 {
+				t.Fatal("test setup: table did not scroll")
+			}
+
+			tb.SetColumns(tc.to)
+			// Between SetColumns and SetRows: the new header over an empty
+			// body, no panic, and no stale row data.
+			v := ansi.Strip(tb.View())
+			if !strings.Contains(v, tc.to[3].Title) {
+				t.Errorf("header before SetRows lacks %s:\n%s", tc.to[3].Title, v)
+			}
+			checkTableLines(t, &tb, width, height)
+			if _, ok := tb.Selected(); ok || tb.Len() != 0 {
+				t.Errorf("rows of the old columns still listed: len=%d", tb.Len())
+			}
+			_, _, total, _ := tb.Position()
+			if total != 0 {
+				t.Errorf("Position total %d before SetRows, want 0", total)
+			}
+
+			tb.SetRows(rowsFor(tc.to, 20))
+			if got := selectedKey(&tb); got != "k17" {
+				t.Errorf("selected %q after SetRows, want k17", got)
+			}
+			if tb.offset != wantOffset {
+				t.Errorf("offset %d after SetRows, want %d", tb.offset, wantOffset)
+			}
+			header := ansi.Strip(strings.Split(tb.View(), "\n")[0])
+			for _, c := range tc.to {
+				if !strings.Contains(header, c.Title) {
+					t.Errorf("header %q lacks %s", header, c.Title)
+				}
+			}
+			for _, c := range tc.from {
+				if !slices.ContainsFunc(tc.to, func(n Column) bool { return n.Title == c.Title }) &&
+					strings.Contains(header, c.Title) {
+					t.Errorf("header %q still shows the old column %s", header, c.Title)
+				}
+			}
+			checkTableLines(t, &tb, width, height)
+		})
+	}
+}
+
+func TestTableSetColumnsKeepsFilter(t *testing.T) {
+	tb := NewTable(fourCols)
+	tb.SetSize(80, 10)
+	tb.SetRows([]Row{
+		{Key: "a", Cells: []string{"web", "nginx", "up", "80/tcp"}},
+		{Key: "b", Cells: []string{"db", "postgres", "up", ""}},
+		{Key: "c", Cells: []string{"cache", "redis", "up", ""}},
+	})
+	press(t, &tb, "/")
+	typeText(&tb, "web")
+	press(t, &tb, "enter")
+	if tb.Len() != 1 {
+		t.Fatalf("test setup: filter web lists %d rows, want 1", tb.Len())
+	}
+
+	tb.SetColumns(fiveCols)
+	if tb.Filter() != "web" {
+		t.Errorf("filter %q after SetColumns, want web", tb.Filter())
+	}
+	// NAME is not a filter column of the new set, but MEM is.
+	tb.SetRows([]Row{
+		{Key: "a", Cells: []string{"web", "nginx", "up", "1.0%", "1MiB"}},
+		{Key: "b", Cells: []string{"db", "postgres", "up", "1.0%", "web-mem"}},
+		{Key: "c", Cells: []string{"cache", "redis", "up", "1.0%", "1MiB"}},
+	})
+	if got := selectedKey(&tb); tb.Len() != 1 || got != "b" {
+		t.Errorf("filter web on the new columns lists %d rows, selected %q; want only b (MEM matches, NAME no longer searched)", tb.Len(), got)
+	}
+	_, _, _, filtered := tb.Position()
+	if !filtered {
+		t.Error("filter no longer reported as applied")
+	}
+	checkTableLines(t, &tb, 80, 10)
+}
+
+func TestTableSetColumnsKeepsFilterFiveToFour(t *testing.T) {
+	tb := NewTable(fiveCols)
+	tb.SetSize(80, 10)
+	tb.SetRows([]Row{
+		{Key: "a", Cells: []string{"web", "nginx", "up", "1.0%", "1MiB"}},
+		{Key: "b", Cells: []string{"db", "postgres", "up", "1.0%", "2MiB"}},
+	})
+	press(t, &tb, "/")
+	typeText(&tb, "web")
+	press(t, &tb, "enter")
+	if tb.Len() != 0 {
+		t.Fatalf("test setup: NAME is not filtered in the 5-column set, but web lists %d rows", tb.Len())
+	}
+	tb.SetColumns(fourCols)
+	tb.SetRows([]Row{
+		{Key: "a", Cells: []string{"web", "nginx", "up", ""}},
+		{Key: "b", Cells: []string{"db", "postgres", "up", ""}},
+	})
+	if got := selectedKey(&tb); tb.Filter() != "web" || tb.Len() != 1 || got != "a" {
+		t.Errorf("filter %q lists %d rows, selected %q; want web, only a (NAME searched again)", tb.Filter(), tb.Len(), got)
+	}
+	checkTableLines(t, &tb, 80, 10)
+}
+
+func TestTableSetColumnsWhileFiltering(t *testing.T) {
+	tb := NewTable(fourCols)
+	tb.SetSize(60, 8)
+	tb.SetRows(rowsFor(fourCols, 5))
+	press(t, &tb, "/")
+	typeText(&tb, "image")
+	tb.SetColumns(fiveCols)
+	checkTableLines(t, &tb, 60, 8)
+	typeText(&tb, "-3") // edits the filter with no rows set
+	tb.SetRows(rowsFor(fiveCols, 5))
+	if !tb.InputFocused() || tb.Filter() != "image-3" {
+		t.Errorf("filter input focused=%v filter=%q, want focused with image-3", tb.InputFocused(), tb.Filter())
+	}
+	if got := selectedKey(&tb); tb.Len() != 1 || got != "k3" {
+		t.Errorf("lists %d rows, selected %q; want only k3", tb.Len(), got)
+	}
+	checkTableLines(t, &tb, 60, 8)
+}
+
+func TestTableSetColumnsTwiceBeforeSetRows(t *testing.T) {
+	tb := NewTable(fourCols)
+	tb.SetSize(60, 8)
+	tb.SetRows(rowsFor(fourCols, 5))
+	press(t, &tb, "j", "j") // k2
+	tb.SetColumns(fiveCols)
+	tb.SetColumns(fourCols)
+	tb.SetRows(rowsFor(fourCols, 5))
+	if got := selectedKey(&tb); got != "k2" {
+		t.Errorf("selected %q, want k2", got)
+	}
+	// The kept key is used once: a later refresh without it falls back as
+	// usual instead of reviving it.
+	tb.SetRows(rowsFor(fourCols, 2))
+	tb.SetRows(rowsFor(fourCols, 5))
+	if got := selectedKey(&tb); got != "k1" {
+		t.Errorf("selected %q after the key left and came back, want k1", got)
+	}
+}
+
+func TestTableSetColumnsSelectedKeyGone(t *testing.T) {
+	tb := NewTable(fourCols)
+	tb.SetSize(60, 8)
+	tb.SetRows(rowsFor(fourCols, 5))
+	press(t, &tb, "G") // k4
+	tb.SetColumns(fiveCols)
+	tb.SetRows(rowsFor(fiveCols, 3))
+	if got := selectedKey(&tb); got != "k2" {
+		t.Errorf("selected %q, want the nearest row k2", got)
+	}
+}
+
+func TestTableColumnsCopiesTheSlice(t *testing.T) {
+	for name, set := range map[string]func(cols []Column) Table{
+		"NewTable": func(cols []Column) Table { return NewTable(cols) },
+		"SetColumns": func(cols []Column) Table {
+			tb := NewTable(fourCols)
+			tb.SetColumns(cols)
+			return tb
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cols := slices.Clone(fourCols)
+			tb := set(cols)
+			cols[0].Title = "CHANGED"
+			tb.SetSize(60, 4)
+			tb.SetRows(rowsFor(fourCols, 1))
+			if v := ansi.Strip(tb.View()); strings.Contains(v, "CHANGED") {
+				t.Errorf("table shares the caller's column slice:\n%s", v)
+			}
+		})
+	}
+}
+
+// Anything that clamps the cursor or the offset while SetColumns has left
+// the table without rows must not lose the selection or the scroll offset.
+func TestTableSetColumnsStateSurvivesEventsBeforeSetRows(t *testing.T) {
+	for name, between := range map[string]func(t *testing.T, tb *Table){
+		"nothing": func(*testing.T, *Table) {},
+		"resize":  func(_ *testing.T, tb *Table) { tb.SetSize(70, 6) },
+		"tiny sizes": func(t *testing.T, tb *Table) {
+			for _, sz := range [][2]int{{0, 0}, {1, 1}, {5, 2}} {
+				tb.SetSize(sz[0], sz[1])
+				_ = tb.View()
+				checkTableLines(t, tb, sz[0], max(sz[1], 1)) // a 0x0 view is ""
+			}
+			tb.SetSize(70, 6)
+		},
+		"keys": func(t *testing.T, tb *Table) { press(t, tb, "j", "G", "g") },
+		"filter edited and cleared": func(t *testing.T, tb *Table) {
+			press(t, tb, "/")
+			typeText(tb, "x")
+			press(t, tb, "backspace", "enter")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, gone := range []bool{false, true} {
+				tb := NewTable(fourCols)
+				tb.SetSize(70, 6)
+				tb.SetRows(rowsFor(fourCols, 20))
+				press(t, &tb, "G", "k", "k") // k17, scrolled down
+				wantOffset := tb.offset
+
+				tb.SetColumns(fiveCols)
+				between(t, &tb)
+				rows := rowsFor(fiveCols, 20)
+				if gone {
+					rows = slices.Delete(rows, 17, 18)
+				}
+				tb.SetRows(rows)
+				switch got := selectedKey(&tb); {
+				case !gone && got != "k17":
+					t.Errorf("selected %q, want k17", got)
+				case gone && got != "k18":
+					t.Errorf("k17 gone: selected %q, want the row now at its position (k18)", got)
+				}
+				if !gone && tb.offset != wantOffset {
+					t.Errorf("offset %d, want %d", tb.offset, wantOffset)
+				}
+				checkTableLines(t, &tb, 70, 6)
+			}
+		})
+	}
+}
