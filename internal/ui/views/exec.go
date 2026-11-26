@@ -49,11 +49,18 @@ type execEnv struct {
 	run func(cmd *exec.Cmd, done tea.ExecCallback) tea.Cmd
 	// poll is the interval between exit-status checks while probing.
 	poll time.Duration
+	// resolve re-reads a named context before the handoff
+	// (dockerctx.Resolve).
+	resolve func(dockerctx.Inputs) (dockerctx.Endpoint, error)
 }
 
 func defaultExecEnv() execEnv {
-	return execEnv{lookPath: exec.LookPath, environ: os.Environ, run: tea.ExecProcess, poll: probePoll}
+	return execEnv{lookPath: exec.LookPath, environ: os.Environ, run: tea.ExecProcess, poll: probePoll, resolve: dockerctx.Resolve}
 }
+
+// errContextChanged means a named context's store entry no longer matches
+// the endpoint drydock resolved at startup.
+var errContextChanged = errors.New("docker context changed")
 
 // execProbeMsg reports the outcome of a shell probe started by view.
 type execProbeMsg struct {
@@ -95,7 +102,7 @@ func (v *containersView) shell(c container.Summary) tea.Cmd {
 	if err != nil {
 		return ui.Error("cannot open a shell: the docker CLI was not found in PATH")
 	}
-	view, st, poll := v.id, v.st, v.exec.poll
+	view, st, poll, resolve := v.id, v.st, v.exec.poll, v.exec.resolve
 	v.probing = true
 	return ui.Track("looking for a shell in "+name, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
@@ -110,9 +117,13 @@ func (v *containersView) shell(c container.Summary) tea.Cmd {
 			shell, err = probeShell(ctx, svc, id, poll)
 			return err
 		})
+		reason := st.ErrorText(err)
+		if err == nil {
+			reason, err = recheckContext(resolve, ep)
+		}
 		return execProbeMsg{
 			view: view, name: name, containerID: id, dockerPath: dockerPath,
-			endpoint: ep, host: host, shell: shell, err: err, reason: st.ErrorText(err),
+			endpoint: ep, host: host, shell: shell, err: err, reason: reason,
 		}
 	})
 }
@@ -174,6 +185,33 @@ func (v *containersView) shellDone(msg execDoneMsg) tea.Cmd {
 	}
 }
 
+// recheckContext re-reads the named context ep from its store and returns
+// an error, with its display text, unless the store still describes ep.
+// The docker CLI reads the store again when the shell opens (see
+// execCommand), so a context changed with `docker context update` while
+// drydock runs would otherwise open the shell on another engine than the
+// one drydock lists containers from. Only the store is read: the context is
+// named and its directory given, so the environment is not consulted. The
+// default context and a named ep without a config directory (which
+// execCommand refuses) are not checked.
+func recheckContext(resolve func(dockerctx.Inputs) (dockerctx.Endpoint, error), ep dockerctx.Endpoint) (string, error) {
+	if ep.IsDefault() || ep.ConfigDir == "" {
+		return "", nil
+	}
+	got, err := resolve(dockerctx.Inputs{
+		Flag:      ep.Context,
+		ConfigDir: ep.ConfigDir,
+		Getenv:    func(string) string { return "" },
+	})
+	if err != nil {
+		return docker.ContextErrorMessage(err), err
+	}
+	if got != ep {
+		return docker.SanitizeText(fmt.Sprintf("Docker context %q changed since startup; restart drydock", ep.Context)), errContextChanged
+	}
+	return "", nil
+}
+
 // execCommand builds the command that opens an interactive shell in a
 // container with the docker CLI at dockerPath. The CLI is pointed at the
 // engine drydock itself uses, described by ep (the service's resolved
@@ -221,6 +259,12 @@ func execCommand(dockerPath string, ep dockerctx.Endpoint, host, containerID, sh
 // and DOCKER_CONFIG is set to ep.ConfigDir; the context itself is selected
 // by a flag (see execCommand).
 func execEnviron(environ []string, ep dockerctx.Endpoint, host string) []string {
+	return execEnvironFor(runtime.GOOS, environ, ep, host)
+}
+
+// execEnvironFor is execEnviron for the operating system goos, whose rules
+// for environment variable names apply.
+func execEnvironFor(goos string, environ []string, ep dockerctx.Endpoint, host string) []string {
 	drop := map[string]bool{"DOCKER_HOST": true, "DOCKER_CONTEXT": true}
 	named := !ep.IsDefault()
 	if named {
@@ -231,7 +275,7 @@ func execEnviron(environ []string, ep dockerctx.Endpoint, host string) []string 
 	out := make([]string, 0, len(environ)+1)
 	for _, kv := range environ {
 		k, _, _ := strings.Cut(kv, "=")
-		if drop[envKey(k)] {
+		if drop[envKey(goos, k)] {
 			continue
 		}
 		out = append(out, kv)
@@ -247,8 +291,8 @@ func execEnviron(environ []string, ep dockerctx.Endpoint, host string) []string 
 
 // envKey normalizes an environment variable name for comparison: names are
 // case-insensitive on Windows.
-func envKey(k string) string {
-	if runtime.GOOS == "windows" {
+func envKey(goos, k string) string {
+	if goos == "windows" {
 		return strings.ToUpper(k)
 	}
 	return k

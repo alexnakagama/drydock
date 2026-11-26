@@ -128,6 +128,8 @@ func TestIntegrationShellThroughNamedContext(t *testing.T) {
 	if err != nil {
 		t.Skip("docker CLI not found")
 	}
+	// Skips before any container is created where no pty can be opened.
+	master, slave := openPTY(t)
 	def, err := docker.NewSDKService("drydock-integration-test", dockerctx.DefaultEndpoint())
 	if err != nil {
 		t.Fatal(err)
@@ -174,11 +176,24 @@ func TestIntegrationShellThroughNamedContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execCommand: %v", err)
 	}
-	master, slave := openPTY(t)
+	if reason, err := recheckContext(dockerctx.Resolve, svc.Endpoint()); err != nil {
+		t.Fatalf("recheckContext on an unchanged store: %s", reason)
+	}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start %q: %v", cmd.Args, err)
 	}
+	var waitErr error
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		waitErr = cmd.Wait()
+	}()
+	// Reaps the CLI if the test fails before it exits.
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-exited
+	})
 	_ = slave.Close() // the CLI holds its own copy; reads then end with EIO
 	var out lockedBuffer
 	copied := make(chan struct{})
@@ -192,15 +207,14 @@ func TestIntegrationShellThroughNamedContext(t *testing.T) {
 		t.Fatalf("write to the shell: %v", err)
 	}
 
-	waited := make(chan error, 1)
-	go func() { waited <- cmd.Wait() }()
 	select {
-	case err = <-waited:
+	case <-exited:
+		err = waitErr
 	case <-time.After(30 * time.Second):
-		_ = cmd.Process.Kill()
-		werr := <-waited
-		t.Fatalf("shell did not exit (killed: %v); args %q, output %q", werr, cmd.Args, out.String())
+		t.Fatalf("shell did not exit; args %q, output %q", cmd.Args, out.String())
 	}
+	// Ends the copy so the output is complete; openPTY's cleanup closes it
+	// again, harmlessly.
 	_ = master.Close()
 	<-copied
 	var exitErr *exec.ExitError
@@ -209,5 +223,15 @@ func TestIntegrationShellThroughNamedContext(t *testing.T) {
 	}
 	if err != nil || !strings.Contains(out.String(), "drydock-42") {
 		t.Fatalf("shell through %q: %v; output %q", cmd.Args, err, out.String())
+	}
+
+	// A context changed while drydock runs is caught before the handoff.
+	update := exec.Command(dockerPath, "context", "update", "drydock-it", "--docker", "host=tcp://127.0.0.1:1")
+	update.Env = append(os.Environ(), "DOCKER_CONFIG="+cfgDir)
+	if out, err := update.CombinedOutput(); err != nil {
+		t.Fatalf("docker context update: %v: %s", err, out)
+	}
+	if _, err := recheckContext(dockerctx.Resolve, svc.Endpoint()); !errors.Is(err, errContextChanged) {
+		t.Errorf("recheckContext after docker context update = %v, want errContextChanged", err)
 	}
 }

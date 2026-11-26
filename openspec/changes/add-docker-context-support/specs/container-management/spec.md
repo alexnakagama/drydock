@@ -11,6 +11,10 @@ When opening a shell with `x`, the application SHALL point the `docker` CLI at t
 - **WHEN** drydock runs with a context whose TCP endpoint uses TLS with stored certificates, and the user presses `x` on running container `web`
 - **THEN** the `docker` CLI connects to that endpoint with the context's certificates and verification setting, and the shell opens in `web`
 
+#### Scenario: Context changed while drydock runs
+- **WHEN** drydock runs with context `colima`, the context's endpoint is changed with `docker context update` (or the context is removed), and the user presses `x` on running container `web`
+- **THEN** no shell is opened, and the status line reports that the context changed since startup (or cannot be read) and suggests restarting drydock
+
 #### Scenario: Shell under DOCKER_HOST
 - **WHEN** drydock runs with the `default` context, `DOCKER_HOST` set to a TCP endpoint and `DOCKER_TLS_VERIFY` and `DOCKER_CERT_PATH` set
 - **THEN** the `docker` CLI connects to that endpoint with the same TLS settings, and the shell opens

@@ -220,6 +220,77 @@ func TestExecCommandRejectsNamedContextWithoutConfigDir(t *testing.T) {
 	}
 }
 
+func TestExecEnvironWindowsNamesAreCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	environ := []string{"Path=C:\\bin", "Docker_Host=tcp://elsewhere:2376", "docker_context=remote", "Docker_Config=C:\\other", "Docker_Tls_Verify=1"}
+	ep := dockerctx.Endpoint{Context: "colima", ConfigDir: `C:\Users\me\.docker`}
+	want := []string{"Path=C:\\bin", `DOCKER_CONFIG=C:\Users\me\.docker`}
+	if got := execEnvironFor("windows", environ, ep, "npipe:////./pipe/docker_engine"); !slices.Equal(got, want) {
+		t.Errorf("windows env = %q, want %q", got, want)
+	}
+	// Elsewhere names are case-sensitive: only exact names are removed.
+	if got := execEnvironFor("linux", environ, ep, ""); !slices.Equal(got, append(slices.Clone(environ), `DOCKER_CONFIG=C:\Users\me\.docker`)) {
+		t.Errorf("linux env = %q", got)
+	}
+}
+
+func TestRecheckContext(t *testing.T) {
+	t.Parallel()
+	ep := dockerctx.Endpoint{Context: "colima", Host: "unix:///a.sock", ConfigDir: "/home/u/.docker"}
+	same := func(in dockerctx.Inputs) (dockerctx.Endpoint, error) {
+		if in.Flag != ep.Context || in.ConfigDir != ep.ConfigDir || in.Getenv("HOME") != "" {
+			t.Errorf("resolve called with %+v", in)
+		}
+		return ep, nil
+	}
+	if reason, err := recheckContext(same, ep); err != nil {
+		t.Errorf("unchanged context: %q, %v", reason, err)
+	}
+	moved := func(dockerctx.Inputs) (dockerctx.Endpoint, error) {
+		got := ep
+		got.Host = "tcp://other:2376"
+		return got, nil
+	}
+	if reason, err := recheckContext(moved, ep); !errors.Is(err, errContextChanged) || !strings.Contains(reason, `Docker context "colima" changed since startup`) {
+		t.Errorf("moved context: %q, %v", reason, err)
+	}
+	gone := func(dockerctx.Inputs) (dockerctx.Endpoint, error) {
+		return dockerctx.Endpoint{}, &dockerctx.ContextError{Name: "colima\x1b[31m", Err: dockerctx.ErrNotFound}
+	}
+	if reason, err := recheckContext(gone, ep); !errors.Is(err, dockerctx.ErrNotFound) || !strings.Contains(reason, "was not found") || strings.Contains(reason, "\x1b") {
+		t.Errorf("removed context: %q, %v", reason, err)
+	}
+	never := func(dockerctx.Inputs) (dockerctx.Endpoint, error) {
+		t.Error("resolve called for the default context or a context without a config directory")
+		return dockerctx.Endpoint{}, nil
+	}
+	for _, e := range []dockerctx.Endpoint{dockerctx.DefaultEndpoint(), {}, {Context: "colima"}} {
+		if _, err := recheckContext(never, e); err != nil {
+			t.Errorf("recheckContext(%+v) = %v", e, err)
+		}
+	}
+}
+
+func TestShellRefusedWhenContextChanged(t *testing.T) {
+	f, ids := sample()
+	f.SetShells(ids["web"], "/bin/sh")
+	ep := dockerctx.Endpoint{Context: "colima", Host: dockerfake.DefaultHost, ConfigDir: t.TempDir()}
+	f.SetEndpoint(ep)
+	e := newEnv(t, f, 100, 12)
+	e.root().exec.resolve = func(dockerctx.Inputs) (dockerctx.Endpoint, error) {
+		moved := ep
+		moved.Host = "tcp://other:2376"
+		return moved, nil
+	}
+	e.selectRow("web")
+	e.press("x")
+	e.waitStatus(`open shell in web: Docker context "colima" changed since startup; restart drydock`)
+	e.settle()
+	if len(e.shells()) != 0 {
+		t.Error("the TUI was suspended for a context that changed")
+	}
+}
+
 func TestShellUsesNamedContext(t *testing.T) {
 	f, ids := sample()
 	f.SetShells(ids["web"], "/bin/sh")
