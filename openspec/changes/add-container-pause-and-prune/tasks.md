@@ -25,8 +25,8 @@
 
 ## 2. Pause and unpause in the containers view
 
-- [ ] 2.1 In `internal/ui/keys/keys.go`, add `Pause` (`p`, help `pause/unpause`) and `Prune` (`P`, help `prune stopped`) to the containers key map, and add both to its `Bindings()` list. Verify by updating `internal/ui/keys/keys_test.go`: the containers bindings include `p` and `P`, and no key conflicts with the global or table keys.
-- [ ] 2.2 In `internal/ui/views/containers.go`, handle `p` (design.md D2):
+- [x] 2.1 In `internal/ui/keys/keys.go`, add `Pause` (`p`, help `pause/unpause`) and `Prune` (`P`, help `prune stopped`) to the containers key map, and add both to its `Bindings()` list. Verify by updating `internal/ui/keys/keys_test.go`: the containers bindings include `p` and `P`, and no key conflicts with the global or table keys.
+- [x] 2.2 In `internal/ui/views/containers.go`, handle `p` (design.md D2):
   - running: `ContainerPause` through `ui.Track`/`st.Action`.
   - paused: `ContainerUnpause` the same way.
   - any other state: `ui.Error("pause/unpause is unavailable for a <state> container (<name>)")` without calling the engine.
@@ -39,12 +39,12 @@
   - `p` on an exited container records no `MethodContainerPause` call and shows the unavailable message.
   - A fake injected pause error is shown in the status area, and `web` stays running.
   - `s` on a paused container shows the new hint.
-- [ ] 2.3 In `KeyHelp`, relabel `p` to `pause` on a running container and to `unpause` on a paused one, disable it otherwise, and place it right after `s`. Add `Prune` (always enabled) just before the stats hint, so `t` stays the first hint dropped (spec "Stats toggle", scenario "Narrow footer"). Update the existing exact-list expectations in `keyhelp_test.go`. Verify with `internal/ui/views/keyhelp_test.go`:
+- [x] 2.3 In `KeyHelp`, relabel `p` to `pause` on a running container and to `unpause` on a paused one, disable it otherwise, and place it right after `s`. Add `Prune` (always enabled) just before the stats hint, so `t` stays the first hint dropped (spec "Stats toggle", scenario "Narrow footer"). Update the existing exact-list expectations in `keyhelp_test.go`. Verify with `internal/ui/views/keyhelp_test.go`:
   - The footer shows `p pause` on a running row and `p unpause` on a paused row.
   - It shows no `p` hint on an exited row or an empty list.
   - Help lists `p` dimmed in that case.
   - Then run `go test ./internal/ui ./internal/ui/views -update` (only those two packages define the flag) and review the golden diffs: only footer lines may change.
-- [ ] 2.4 Verify stats resume after unpausing with a test in `internal/ui/views/containers_stats_test.go`. With stats on, a paused `web` shows `-` and has no stats stream open (`StatsStreams()`). After unpausing and queueing samples with `SetStats`, its CPU cell shows a value without toggling `t`.
+- [x] 2.4 Verify stats resume after unpausing with a test in `internal/ui/views/containers_stats_test.go`. With stats on, a paused `web` shows `-` and has no stats stream open (`StatsStreams()`). After unpausing and queueing samples with `SetStats`, its CPU cell shows a value without toggling `t`.
 
 ## 3. Shared one-by-one removal
 

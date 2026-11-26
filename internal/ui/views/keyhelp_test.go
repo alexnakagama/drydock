@@ -2,6 +2,7 @@ package views
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -142,11 +143,11 @@ func TestContainersKeyHelp(t *testing.T) {
 		name string
 		want []string
 	}{
-		{"web", []string{"l logs", "s stop", "x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "t stats"}},
-		{"old", []string{"l logs", "s start", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "t stats"}},
-		{"fresh", []string{"l logs", "s start", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "t stats"}},
-		{"frozen", []string{"l logs", "-s start/stop", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "t stats"}},
-		{"boot", []string{"l logs", "-s start/stop", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "t stats"}},
+		{"web", []string{"l logs", "s stop", "p pause", "x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats"}},
+		{"old", []string{"l logs", "s start", "-p pause/unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats"}},
+		{"fresh", []string{"l logs", "s start", "-p pause/unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats"}},
+		{"frozen", []string{"l logs", "-s start/stop", "p unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats"}},
+		{"boot", []string{"l logs", "-s start/stop", "-p pause/unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats"}},
 	}
 	for _, tt := range tests {
 		e.selectRow(tt.name)
@@ -157,7 +158,8 @@ func TestContainersKeyHelp(t *testing.T) {
 func TestContainersKeyHelpEmpty(t *testing.T) {
 	e := newEnv(t, dockerfake.New(), 100, 8)
 	checkHelp(t, "empty list", e.root().KeyHelp(), []string{
-		"-l logs", "-s start/stop", "-x shell", "-i inspect", "-r restart", "-d delete", "a all/running", "/ filter", "t stats",
+		"-l logs", "-s start/stop", "-p pause/unpause", "-x shell", "-i inspect", "-r restart", "-d delete", "a all/running", "/ filter",
+		"P prune stopped", "t stats",
 	})
 
 	// A filter matching nothing leaves no selection either.
@@ -167,8 +169,72 @@ func TestContainersKeyHelpEmpty(t *testing.T) {
 	e.typeText("zzz")
 	e.press("enter")
 	checkHelp(t, "filtered to nothing", e.root().KeyHelp(), []string{
-		"-l logs", "-s start/stop", "-x shell", "-i inspect", "-r restart", "-d delete", "a all/running", "/ filter", "t stats",
+		"-l logs", "-s start/stop", "-p pause/unpause", "-x shell", "-i inspect", "-r restart", "-d delete", "a all/running", "/ filter",
+		"P prune stopped", "t stats",
 	})
+}
+
+func TestContainersFooterPauseHint(t *testing.T) {
+	f, _ := sample()
+	e := newEnv(t, f, 200, 12)
+	e.press("a")
+	for name, want := range map[string]string{"web": "p pause", "frozen": "p unpause"} {
+		e.selectRow(name)
+		ft := e.footer()
+		if !strings.Contains(ft, "  "+want+"  ") {
+			t.Errorf("%s: footer %q, want %q", name, ft, want)
+		}
+		if !strings.Contains(ft, "s ") || strings.Index(ft, want) < strings.Index(ft, "s ") {
+			t.Errorf("%s: footer %q, want %q right after the s hint", name, ft, want)
+		}
+	}
+	e.selectRow("old")
+	if ft := e.footer(); strings.Contains(ft, "p pause") || strings.Contains(ft, "p unpause") {
+		t.Errorf("exited row: footer %q, want no p hint", ft)
+	}
+	if ft := e.footer(); !strings.Contains(ft, "P prune stopped  t stats") {
+		t.Errorf("footer %q, want P prune stopped just before t stats", ft)
+	}
+
+	e = newEnv(t, dockerfake.New(), 200, 8)
+	if ft := e.footer(); strings.Contains(ft, " p ") || !strings.Contains(ft, "P prune stopped") {
+		t.Errorf("empty list: footer %q, want no p hint and P prune stopped", ft)
+	}
+}
+
+// TestFooterDropsStatsHintFirst checks that the t hint stays the first view
+// hint dropped from a narrow footer, now that P comes before it.
+func TestFooterDropsStatsHintFirst(t *testing.T) {
+	f, _ := sample()
+	e := newEnv(t, f, 120, 12)
+	e.selectRow("web")
+	ft := e.footer()
+	if strings.Contains(ft, "t stats") || !strings.Contains(ft, "P prune stopped") || !strings.HasSuffix(ft, "? more") {
+		t.Errorf("footer %q, want P prune stopped kept and t stats dropped", ft)
+	}
+}
+
+func TestHelpListsPauseDimmed(t *testing.T) {
+	f, _ := sample()
+	e := newEnv(t, f, 100, 30)
+	e.press("a")
+	e.selectRow("old")
+	if b := findHelp(t, e.root().KeyHelp(), "p"); b.Enabled() || b.Help().Desc != "pause/unpause" {
+		t.Fatalf("p hint = %+v enabled=%v, want it disabled with the generic label", b.Help(), b.Enabled())
+	}
+	e.press("?")
+	if s := e.screen(); !strings.Contains(s, "p          pause/unpause") {
+		t.Errorf("help lacks the dimmed p entry:\n%s", s)
+	}
+}
+
+func TestHiddenPauseKeyStillWorks(t *testing.T) {
+	f, _ := sample()
+	e := newEnv(t, f, 100, 12)
+	e.press("a")
+	e.selectRow("old")
+	e.press("p")
+	e.waitStatus("pause/unpause is unavailable for a exited container (old)")
 }
 
 func TestImagesKeyHelp(t *testing.T) {
@@ -291,6 +357,8 @@ func TestKeyHelpLeavesKeymapsUntouched(t *testing.T) {
 		want []string
 	}{
 		{keys.Containers.StartStop, []string{"s"}},
+		{keys.Containers.Pause, []string{"p"}},
+		{keys.Containers.Prune, []string{"P"}},
 		{keys.Containers.Shell, []string{"x"}},
 		{keys.Containers.Logs, []string{"l"}},
 		{keys.Images.Containers, []string{"enter"}},
