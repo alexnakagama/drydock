@@ -12,13 +12,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/alexnakagama/drydock/internal/docker"
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 	"github.com/alexnakagama/drydock/internal/store"
 )
 
 // connectedStore runs a store on the real engine until the test ends.
 func connectedStore(t *testing.T) *store.Store {
 	t.Helper()
-	svc, err := docker.NewSDKService("drydock-integration-test")
+	svc, err := docker.NewSDKService("drydock-integration-test", dockerctx.DefaultEndpoint())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,8 @@ import (
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/jsonstream"
 	"github.com/moby/moby/api/types/volume"
+
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 )
 
 // Service is drydock's narrow interface to the Docker engine.
@@ -23,6 +25,10 @@ import (
 //
 // Implementations must be safe for concurrent use.
 type Service interface {
+	// Endpoint returns the resolved Docker context the service was created
+	// for. For the default context its Host is "", since the endpoint comes
+	// from the environment; Host reports the endpoint actually used.
+	Endpoint() dockerctx.Endpoint
 	// Host returns the engine endpoint the service talks to, for example
 	// "unix:///var/run/docker.sock".
 	Host() string

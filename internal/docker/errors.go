@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 	"unicode"
 
 	cerrdefs "github.com/containerd/errdefs"
+
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 )
 
 // IsNotFound reports whether err means the requested object does not exist.
@@ -67,10 +71,14 @@ func ClassifyConnectError(err error) ConnectFailure {
 }
 
 // ConnectErrorMessage builds the human-readable message printed when the
-// engine at host cannot be reached at startup. timeout is the ping timeout
-// that was used. The result is safe to print to a terminal.
-func ConnectErrorMessage(host string, err error, timeout time.Duration) string {
-	safeHost := RedactHost(host)
+// engine at host cannot be reached at startup. ep is the resolved context,
+// named in the message unless it is the default one, and timeout is the ping
+// timeout that was used. The result is safe to print to a terminal.
+func ConnectErrorMessage(ep dockerctx.Endpoint, host string, err error, timeout time.Duration) string {
+	where := "at " + RedactHost(host)
+	if !ep.IsDefault() {
+		where = fmt.Sprintf("for context %s (%s)", quoteName(ep.Context), RedactHost(host))
+	}
 	// SDK errors embed the endpoint verbatim, so credentials in it must be
 	// scrubbed from the error text too.
 	errText := ""
@@ -80,16 +88,65 @@ func ConnectErrorMessage(host string, err error, timeout time.Duration) string {
 	var msg string
 	switch ClassifyConnectError(err) {
 	case FailureNotRunning:
-		msg = fmt.Sprintf("cannot connect to the Docker engine at %s: the engine may not be running (%s)", safeHost, errText)
+		msg = fmt.Sprintf("cannot connect to the Docker engine %s: the engine may not be running (%s)", where, errText)
 	case FailurePermission:
-		msg = fmt.Sprintf("permission denied for the Docker engine at %s: your user cannot access it; "+
-			"add it to the docker group or point DOCKER_HOST at a socket you can access (%s)", safeHost, errText)
+		msg = fmt.Sprintf("permission denied for the Docker engine %s: your user cannot access it; "+
+			"add your user to the docker group, or point DOCKER_HOST or a Docker context "+
+			"at a socket you can access (%s)", where, errText)
 	case FailureTimeout:
-		msg = fmt.Sprintf("the Docker engine at %s did not respond within %s", safeHost, timeout)
+		msg = fmt.Sprintf("the Docker engine %s did not respond within %s", where, timeout)
 	default:
-		msg = fmt.Sprintf("cannot connect to the Docker engine at %s: %s", safeHost, errText)
+		msg = fmt.Sprintf("cannot connect to the Docker engine %s: %s", where, errText)
 	}
 	return SanitizeText(msg)
+}
+
+// ContextErrorMessage builds the human-readable message printed when the
+// active Docker context cannot be resolved (an error from dockerctx.Resolve):
+// an unknown context, an unreadable or malformed file, or an ssh://
+// endpoint. Context names and paths come from files and the environment, so
+// the result is sanitized and safe to print to a terminal.
+func ContextErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	name := ""
+	var ce *dockerctx.ContextError
+	if errors.As(err, &ce) {
+		name = quoteName(ce.Name)
+	}
+	var fe *dockerctx.FileError
+	var msg string
+	switch {
+	case errors.Is(err, dockerctx.ErrNotFound):
+		msg = fmt.Sprintf("Docker context %s was not found; run \"docker context ls\" to list the available contexts", name)
+	case errors.Is(err, dockerctx.ErrSSHUnsupported):
+		msg = fmt.Sprintf("context %s uses an ssh:// endpoint, which drydock does not support yet; "+
+			"forward the remote socket (for example with ssh -L) and set DOCKER_HOST to it", name)
+	case errors.As(err, &fe) && name != "":
+		msg = fmt.Sprintf("cannot read Docker context %s: %s: %s", name, fe.Path, fileErrorReason(fe))
+	case errors.As(err, &fe):
+		msg = fmt.Sprintf("cannot read the Docker CLI config %s: %s", fe.Path, fileErrorReason(fe))
+	default:
+		msg = "cannot resolve the Docker context: " + err.Error()
+	}
+	return SanitizeText(msg)
+}
+
+// fileErrorReason returns why fe's file failed, without repeating the path
+// that an *fs.PathError would add.
+func fileErrorReason(fe *dockerctx.FileError) string {
+	var pe *fs.PathError
+	if errors.As(fe.Err, &pe) && pe.Path == fe.Path {
+		return pe.Err.Error()
+	}
+	return fe.Err.Error()
+}
+
+// quoteName quotes a context name for a message. Names come from files and
+// the environment, so control characters are replaced before quoting.
+func quoteName(name string) string {
+	return strconv.Quote(SanitizeText(name))
 }
 
 // ErrorText returns err's message made safe for display: the credentials of

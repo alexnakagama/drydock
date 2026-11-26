@@ -264,6 +264,12 @@ func isFile(path string) (bool, error) {
 	return true, nil
 }
 
+// ReadFile reads a file of the context store, such as one of an Endpoint's
+// pem files, with the same checks Resolve applies: at most 1 MiB, regular
+// files only, and opened without blocking so a FIFO cannot hang the caller.
+// A missing file is an error matching fs.ErrNotExist.
+func ReadFile(path string) ([]byte, error) { return readFile(path) }
+
 // readFile reads at most maxFileSize bytes of a regular file. The file is
 // opened without blocking (see openNoBlock) and its type is checked on the
 // open descriptor, so a FIFO or device swapped in for the file is rejected

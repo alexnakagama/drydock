@@ -22,6 +22,7 @@ import (
 	"github.com/moby/moby/api/types/volume"
 
 	"github.com/alexnakagama/drydock/internal/docker"
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 )
 
 // These end-to-end tests run a store with its production timings against the
@@ -123,7 +124,7 @@ func startStore(t *testing.T) *liveRecorder {
 	if _, err := exec.LookPath("docker"); err != nil {
 		t.Skip("docker CLI not found")
 	}
-	svc, err := docker.NewSDKService("drydock-integration-test")
+	svc, err := docker.NewSDKService("drydock-integration-test", dockerctx.DefaultEndpoint())
 	if err != nil {
 		t.Fatalf("NewSDKService: %v", err)
 	}
@@ -166,7 +167,7 @@ func dockerCLI(t *testing.T, args ...string) string {
 // one engine while the store watches another, as drydock's exec view also
 // guards against.
 var cliEnv = sync.OnceValues(func() ([]string, error) {
-	svc, err := docker.NewSDKService("")
+	svc, err := docker.NewSDKService("", dockerctx.DefaultEndpoint())
 	if err != nil {
 		return nil, fmt.Errorf("resolve engine endpoint: %w", err)
 	}

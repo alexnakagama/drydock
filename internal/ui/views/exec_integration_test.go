@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alexnakagama/drydock/internal/docker"
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 )
 
 // These tests run against the engine configured by the environment and use
@@ -48,7 +49,7 @@ func dockerRun(t *testing.T, args ...string) string {
 }
 
 func TestIntegrationProbeShell(t *testing.T) {
-	svc, err := docker.NewSDKService("drydock-integration-test")
+	svc, err := docker.NewSDKService("drydock-integration-test", dockerctx.DefaultEndpoint())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +74,7 @@ func TestIntegrationProbeShell(t *testing.T) {
 }
 
 func TestIntegrationProbeNoShell(t *testing.T) {
-	svc, err := docker.NewSDKService("drydock-integration-test")
+	svc, err := docker.NewSDKService("drydock-integration-test", dockerctx.DefaultEndpoint())
 	if err != nil {
 		t.Fatal(err)
 	}

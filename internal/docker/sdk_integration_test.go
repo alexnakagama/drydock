@@ -19,6 +19,8 @@ import (
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/client"
 	"github.com/moby/moby/client/pkg/versions"
+
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 )
 
 // These tests run against the engine configured by the environment
@@ -29,7 +31,7 @@ import (
 
 func newIntegrationService(t *testing.T) *SDKService {
 	t.Helper()
-	svc, err := NewSDKService("drydock-integration-test")
+	svc, err := NewSDKService("drydock-integration-test", dockerctx.DefaultEndpoint())
 	if err != nil {
 		t.Fatalf("NewSDKService: %v", err)
 	}
@@ -52,7 +54,7 @@ func testVolumeName(t *testing.T) string {
 }
 
 func TestIntegrationPingNegotiatesVersion(t *testing.T) {
-	svc, err := NewSDKService("drydock-integration-test")
+	svc, err := NewSDKService("drydock-integration-test", dockerctx.DefaultEndpoint())
 	if err != nil {
 		t.Fatal(err)
 	}
