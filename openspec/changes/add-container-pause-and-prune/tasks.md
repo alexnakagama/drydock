@@ -48,7 +48,7 @@
 
 ## 3. Shared one-by-one removal
 
-- [ ] 3.1 Extract the loop and summary of `removeVolumes` in `internal/ui/views/volumes.go` into a generic `removal[T]` helper in a new `internal/ui/views/removal.go` (design.md D5). `removeVolumes` becomes a thin wrapper with unchanged signature and messages. Verify:
+- [x] 3.1 Extract the loop and summary of `removeVolumes` in `internal/ui/views/volumes.go` into a generic `removal[T]` helper in a new `internal/ui/views/removal.go` (design.md D5). `removeVolumes` becomes a thin wrapper with unchanged signature and messages. Verify:
   - The existing volume prune tests pass unchanged: `go test -race ./internal/ui/views/`.
   - New `removal_test.go` cases with a stub `remove` cover all-removed, already-gone, failures beyond `maxListedFailures`, an interrupted item, and not-attempted items after cancellation.
 

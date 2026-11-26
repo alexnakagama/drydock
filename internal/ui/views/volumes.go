@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
@@ -407,77 +406,23 @@ func (v *volumesView) confirmPrune() tea.Cmd {
 			})))
 }
 
-// maxListedFailures bounds the failed volumes a prune report names.
-const maxListedFailures = 3
+// volumeRemoval removes volumes one by one with removeVolume.
+func volumeRemoval(svc docker.Service) removal[volume.Volume] {
+	return removal[volume.Volume]{
+		name: func(vol volume.Volume) string { return vol.Name },
+		remove: func(ctx context.Context, vol volume.Volume) error {
+			return removeVolume(ctx, svc, vol)
+		},
+		gone: errVolumeGone,
+		noun: [2]string{"volume", "volumes"},
+	}
+}
 
 // removeVolumes removes the given volumes one by one (see removeVolume),
 // carrying on past failures, and returns a summary such as "2 volumes
 // removed, 1 already gone". If any removal failed, or ctx ended before all
-// were done, it returns an error summarizing the outcome instead, naming the
-// failed volumes before the first error, for example "2 removed, 1 failed
-// (pgdata): pgdata: volume is in use". A volume whose removal ctx cut off
-// is reported as interrupted: the engine may or may not have removed it.
+// were done, it returns an error summarizing the outcome instead (see
+// removal.run).
 func removeVolumes(ctx context.Context, svc docker.Service, vols []volume.Volume) (string, error) {
-	var (
-		removed, gone, notAttempted int
-		failed                      []string
-		interrupted                 string
-		firstErr                    error
-		stopped                     bool
-	)
-	for i, vol := range vols {
-		if ctx.Err() != nil {
-			stopped, notAttempted = true, len(vols)-i
-			break
-		}
-		err := removeVolume(ctx, svc, vol)
-		switch {
-		case err == nil:
-			removed++
-		case errors.Is(err, errVolumeGone):
-			gone++
-		case ctx.Err() != nil && errors.Is(err, ctx.Err()):
-			stopped, interrupted, notAttempted = true, vol.Name, len(vols)-i-1
-		default:
-			failed = append(failed, vol.Name)
-			if firstErr == nil {
-				firstErr = fmt.Errorf("%s: %w", vol.Name, err)
-			}
-		}
-		if stopped {
-			break
-		}
-	}
-
-	parts := []string{fmt.Sprintf("%d removed", removed)}
-	if gone > 0 {
-		parts = append(parts, fmt.Sprintf("%d already gone", gone))
-	}
-	if len(failed) > 0 {
-		listed := failed
-		if len(listed) > maxListedFailures {
-			listed = append(slices.Clip(listed[:maxListedFailures]), fmt.Sprintf("%d more", len(failed)-maxListedFailures))
-		}
-		parts = append(parts, fmt.Sprintf("%d failed (%s)", len(failed), strings.Join(listed, ", ")))
-	}
-	if interrupted != "" {
-		parts = append(parts, "1 interrupted ("+interrupted+")")
-	}
-	if notAttempted > 0 {
-		parts = append(parts, fmt.Sprintf("%d not attempted", notAttempted))
-	}
-	summary := strings.Join(parts, ", ")
-
-	switch {
-	case stopped && firstErr != nil:
-		return "", fmt.Errorf("%s: %w; %w", summary, context.Cause(ctx), firstErr)
-	case stopped:
-		return "", fmt.Errorf("%s: %w", summary, context.Cause(ctx))
-	case firstErr != nil:
-		return "", fmt.Errorf("%s: %w", summary, firstErr)
-	}
-	if gone > 0 {
-		return fmt.Sprintf("%s removed, %d already gone", plural(removed, "volume", "volumes"), gone), nil
-	}
-	return plural(removed, "volume", "volumes") + " removed", nil
+	return volumeRemoval(svc).run(ctx, vols)
 }
