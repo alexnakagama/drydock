@@ -191,34 +191,41 @@ func (v *containersView) Indicators() []string {
 
 // KeyHelp returns the view's bindings in priority order, as copies:
 // actions that do not apply to the selected container (or that need a
-// selection when there is none) are disabled, and `s` and `t` are labelled
-// with what they would do. `t` comes last, so it is the first hint the
-// footer drops when it runs out of room. Key presses are still matched
-// against keys.Containers, so a disabled hint never disables its key.
+// selection when there is none) are disabled, and `s`, `p` and `t` are
+// labelled with what they would do. `p` follows `s`, so it is dropped late;
+// `P`, which needs no selection, comes just before `t`, and `t` comes last,
+// so it is the first hint the footer drops when it runs out of room. Key
+// presses are still matched against keys.Containers, so a disabled hint
+// never disables its key.
 func (v *containersView) KeyHelp() []key.Binding {
 	km := keys.Containers
-	logs, startStop, shell, inspect, restart, del := km.Logs, km.StartStop, km.Shell, km.Inspect, km.Restart, km.Delete
+	logs, startStop, pause, shell, inspect, restart, del := km.Logs, km.StartStop, km.Pause, km.Shell, km.Inspect, km.Restart, km.Delete
 	stats := km.Stats
 	if v.statsCols {
 		stats.SetHelp(km.Stats.Help().Key, "ports")
 	}
 	c, ok := v.selected()
 	if !ok {
-		disable(&logs, &startStop, &shell, &inspect, &restart, &del)
+		disable(&logs, &startStop, &pause, &shell, &inspect, &restart, &del)
 	} else {
 		switch c.State {
 		case container.StateRunning:
 			startStop.SetHelp(km.StartStop.Help().Key, "stop")
+			pause.SetHelp(km.Pause.Help().Key, "pause")
+		case container.StatePaused:
+			disable(&startStop)
+			pause.SetHelp(km.Pause.Help().Key, "unpause")
 		case container.StateCreated, container.StateExited:
 			startStop.SetHelp(km.StartStop.Help().Key, "start")
+			disable(&pause)
 		default:
-			disable(&startStop)
+			disable(&startStop, &pause)
 		}
 		if c.State != container.StateRunning {
 			disable(&shell)
 		}
 	}
-	return []key.Binding{logs, startStop, shell, inspect, restart, del, km.ToggleAll, keys.Table.Filter, stats}
+	return []key.Binding{logs, startStop, pause, shell, inspect, restart, del, km.ToggleAll, keys.Table.Filter, km.Prune, stats}
 }
 
 // Position reports the table's selection and row counts (ui.Positioner).
@@ -320,6 +327,8 @@ func (v *containersView) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, km.StartStop):
 		return v.startStop(c)
+	case key.Matches(msg, km.Pause):
+		return v.pause(c)
 	case key.Matches(msg, km.Restart):
 		return v.restart(c)
 	case key.Matches(msg, km.Delete):
@@ -661,8 +670,32 @@ func (v *containersView) startStop(c container.Summary) tea.Cmd {
 		return ui.Track("starting "+name, v.st.Action("start "+name, func(ctx context.Context, svc docker.Service) error {
 			return svc.ContainerStart(ctx, id)
 		}))
+	case container.StatePaused:
+		// A paused container cannot act on SIGTERM, so a stop would wait out
+		// the whole timeout before the engine killed it. Point to p instead.
+		return ui.Error(fmt.Sprintf("start/stop is unavailable for a %s container (%s); press p to unpause",
+			stateName(c.State), name))
 	default:
 		return ui.Error(fmt.Sprintf("start/stop is unavailable for a %s container (%s)", stateName(c.State), name))
+	}
+}
+
+// pause pauses a running container and unpauses a paused one, without
+// confirmation since both are reversible. Any other state is refused
+// without calling the engine.
+func (v *containersView) pause(c container.Summary) tea.Cmd {
+	name, id := store.ContainerName(c), c.ID
+	switch c.State {
+	case container.StateRunning:
+		return ui.Track("pausing "+name, v.st.Action("pause "+name, func(ctx context.Context, svc docker.Service) error {
+			return svc.ContainerPause(ctx, id)
+		}))
+	case container.StatePaused:
+		return ui.Track("unpausing "+name, v.st.Action("unpause "+name, func(ctx context.Context, svc docker.Service) error {
+			return svc.ContainerUnpause(ctx, id)
+		}))
+	default:
+		return ui.Error(fmt.Sprintf("pause/unpause is unavailable for a %s container (%s)", stateName(c.State), name))
 	}
 }
 

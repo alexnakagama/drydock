@@ -109,7 +109,7 @@ func TestFormatStats(t *testing.T) {
 
 func TestContainersStatsToggle(t *testing.T) {
 	f, _ := sample()
-	e := newEnv(t, f, 120, 30) // tall enough for the help overlay
+	e := newEnv(t, f, 160, 30) // wide enough for the t hint, tall enough for help
 	e.settle()
 	if f.StatsStreams() != 0 || len(f.CallsTo(dockerfake.MethodContainerStats)) != 0 {
 		t.Fatal("stats read while off")
@@ -267,6 +267,39 @@ func TestContainersStatsLiveUpdates(t *testing.T) {
 	})
 	if cpu, mem := e.statsCellsOf("web"); cpu != noStats || mem != noStats {
 		t.Errorf("stopped web: cells %q %q, want -", cpu, mem)
+	}
+}
+
+// TestContainersStatsResumeAfterUnpause checks that pausing a container
+// closes its stats stream and unpausing it reopens one, without toggling t.
+func TestContainersStatsResumeAfterUnpause(t *testing.T) {
+	f, ids := sample()
+	e := newEnv(t, f, 120, 12)
+	e.press("t")
+	e.waitStreams(2) // web and db; frozen is paused
+	f.SetStats(ids["web"], statsSample(25, 100*mib, gib))
+	e.until("web value", func() bool { cpu, _ := e.statsCellsOf("web"); return cpu == "25.0%" })
+
+	e.selectRow("web")
+	e.press("p")
+	e.waitStatus("pause web: done")
+	e.until("web paused", func() bool { return e.root().shown[ids["web"]].State == container.StatePaused })
+	e.waitStreams(1) // db only: a paused container is not a stats target
+	if cpu, mem := e.statsCellsOf("web"); cpu != noStats || mem != noStats {
+		t.Errorf("paused web: cells %q %q, want -", cpu, mem)
+	}
+
+	f.ResetCalls()
+	e.press("p")
+	e.waitStatus("unpause web: done")
+	e.waitStreams(2)
+	if got := statsTargetsCalled(f); !slices.Contains(got, ids["web"]) {
+		t.Errorf("stats streams opened after unpausing for %q, want web among them", got)
+	}
+	f.SetStats(ids["web"], statsSample(50, 200*mib, gib))
+	e.until("web value after unpausing", func() bool { cpu, _ := e.statsCellsOf("web"); return cpu == "50.0%" })
+	if !e.root().statsCols {
+		t.Error("stats layout lost after unpausing")
 	}
 }
 

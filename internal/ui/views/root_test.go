@@ -88,7 +88,7 @@ func TestTabsSwitchAndHighlightWithRealViews(t *testing.T) {
 func TestFooterWideShowsEverything(t *testing.T) {
 	e := newEnv(t, mixedContainers(), 200, 12)
 	e.selectRow("web")
-	want := " l logs  s stop  x shell  i inspect  r restart  d delete  a all/running  / filter  t stats  : command  ? help  q quit"
+	want := " l logs  s stop  p pause  x shell  i inspect  r restart  d delete  a all/running  / filter  P prune stopped  t stats  : command  ? help  q quit"
 	if got := e.footer(); got != want {
 		t.Errorf("footer\n  %q\nwant\n  %q", got, want)
 	}
@@ -114,7 +114,7 @@ func TestFooterNarrowEndsWithMore(t *testing.T) {
 		e.selectRow("web")
 		got := e.footer()
 		check(t, got, 60)
-		if !strings.HasPrefix(got, " l logs  s stop  x shell") {
+		if !strings.HasPrefix(got, " l logs  s stop  p pause  x shell") {
 			t.Errorf("footer %q does not keep the highest-priority hints", got)
 		}
 	})

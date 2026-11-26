@@ -69,7 +69,31 @@ func TestContainersKeysDistinct(t *testing.T) {
 			owner[k] = b.Help().Desc
 		}
 	}
-	if b := Containers.Stats; !slices.Equal(b.Keys(), []string{"t"}) || b.Help().Key != "t" {
-		t.Errorf("Stats binding = keys %q help %q, want t", b.Keys(), b.Help().Key)
+	for _, want := range []struct {
+		name string
+		b    key.Binding
+		key  string
+	}{
+		{"Stats", Containers.Stats, "t"},
+		{"Pause", Containers.Pause, "p"},
+		{"Prune", Containers.Prune, "P"},
+	} {
+		if !slices.Equal(want.b.Keys(), []string{want.key}) || want.b.Help().Key != want.key {
+			t.Errorf("%s binding = keys %q help %q, want %s", want.name, want.b.Keys(), want.b.Help().Key, want.key)
+		}
+	}
+}
+
+// TestContainersBindingsListPauseAndPrune fails if p or P is bound but left
+// out of Bindings, which would hide it from the footer and help.
+func TestContainersBindingsListPauseAndPrune(t *testing.T) {
+	var listed []string
+	for _, b := range Containers.Bindings() {
+		listed = append(listed, b.Keys()...)
+	}
+	for _, k := range []string{"p", "P"} {
+		if !slices.Contains(listed, k) {
+			t.Errorf("containers Bindings() does not list %q", k)
+		}
 	}
 }

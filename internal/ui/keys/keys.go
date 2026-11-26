@@ -150,12 +150,17 @@ func (m PagerMap) Bindings() []key.Binding {
 // ContainersMap holds the containers view's action keys.
 type ContainersMap struct {
 	StartStop key.Binding
+	// Pause pauses a running container and unpauses a paused one. The
+	// view relabels its help to name the action for the selected row.
+	Pause     key.Binding
 	Restart   key.Binding
 	Delete    key.Binding
 	Logs      key.Binding
 	Inspect   key.Binding
 	Shell     key.Binding
 	ToggleAll key.Binding
+	// Prune removes the stopped containers in the view's scope.
+	Prune key.Binding
 	// Stats switches the PORTS column for the live CPU and MEM columns.
 	Stats key.Binding
 }
@@ -163,18 +168,20 @@ type ContainersMap struct {
 // Containers is the containers-view keymap.
 var Containers = ContainersMap{
 	StartStop: key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start/stop")),
+	Pause:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pause/unpause")),
 	Restart:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
 	Delete:    key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
 	Logs:      key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "logs")),
 	Inspect:   key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "inspect")),
 	Shell:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "shell")),
 	ToggleAll: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/running")),
+	Prune:     key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "prune stopped")),
 	Stats:     key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "stats")),
 }
 
 // Bindings returns the containers-view bindings in display order.
 func (m ContainersMap) Bindings() []key.Binding {
-	return []key.Binding{m.StartStop, m.Restart, m.Delete, m.Logs, m.Inspect, m.Shell, m.ToggleAll, m.Stats}
+	return []key.Binding{m.StartStop, m.Pause, m.Restart, m.Delete, m.Logs, m.Inspect, m.Shell, m.ToggleAll, m.Prune, m.Stats}
 }
 
 // LogsMap holds the logs view's own keys (scrolling uses Pager).

@@ -273,12 +273,133 @@ func TestStartStopUnavailableForPaused(t *testing.T) {
 	e.selectRow("frozen")
 	f.ResetCalls()
 	e.press("s")
-	e.waitStatus("start/stop is unavailable for a paused container")
+	e.waitStatus("start/stop is unavailable for a paused container (frozen); press p to unpause")
 	e.settle()
 	for _, c := range f.Calls() {
 		if c.Method == dockerfake.MethodContainerStart || c.Method == dockerfake.MethodContainerStop {
 			t.Errorf("engine called: %+v", c)
 		}
+	}
+}
+
+// TestStartStopUnavailableForRestarting checks that the unpause hint is
+// given only for a paused container.
+func TestStartStopUnavailableForRestarting(t *testing.T) {
+	f, _ := sample()
+	f.AddContainer(ctr(cid(4), "boot", "alpine", container.StateRestarting, "Restarting (1) 2 seconds ago"))
+	e := newEnv(t, f, 100, 12)
+	e.selectRow("boot")
+	e.press("s")
+	e.waitStatus("start/stop is unavailable for a restarting container (boot)")
+	if s := e.screen(); strings.Contains(s, "press p") {
+		t.Errorf("restarting container offered the unpause hint:\n%s", s)
+	}
+}
+
+func TestPauseRunningContainer(t *testing.T) {
+	f, ids := sample()
+	e := newEnv(t, f, 100, 12)
+	e.selectRow("web")
+	e.press("p")
+	e.waitStatus("pause web: done")
+	if calls := f.CallsTo(dockerfake.MethodContainerPause); len(calls) != 1 || calls[0].Args[0] != ids["web"] {
+		t.Errorf("ContainerPause calls = %+v", calls)
+	}
+	if calls := f.CallsTo(dockerfake.MethodContainerUnpause); len(calls) != 0 {
+		t.Errorf("ContainerUnpause calls = %+v, want none", calls)
+	}
+	// The pause event refreshes the list; paused containers stay listed in
+	// running-only mode.
+	e.until("web paused", func() bool { return strings.Contains(e.statusCell("web"), "◐ Up 5 minutes (Paused)") })
+}
+
+func TestUnpausePausedContainer(t *testing.T) {
+	f, ids := sample()
+	e := newEnv(t, f, 100, 12)
+	e.selectRow("web")
+	e.press("p")
+	e.waitStatus("pause web: done")
+	e.until("web paused", func() bool { return strings.Contains(e.rowOf("web"), "(Paused)") })
+
+	e.press("p")
+	e.waitStatus("unpause web: done")
+	if calls := f.CallsTo(dockerfake.MethodContainerUnpause); len(calls) != 1 || calls[0].Args[0] != ids["web"] {
+		t.Errorf("ContainerUnpause calls = %+v", calls)
+	}
+	e.until("web running", func() bool {
+		cell := e.statusCell("web")
+		return strings.HasPrefix(cell, "● Up") && !strings.Contains(cell, "Paused")
+	})
+}
+
+func TestUnpauseInitiallyPausedContainer(t *testing.T) {
+	f, ids := sample()
+	e := newEnv(t, f, 100, 12)
+	e.selectRow("frozen")
+	e.press("p")
+	e.waitStatus("unpause frozen: done")
+	if calls := f.CallsTo(dockerfake.MethodContainerUnpause); len(calls) != 1 || calls[0].Args[0] != ids["frozen"] {
+		t.Errorf("ContainerUnpause calls = %+v", calls)
+	}
+	e.until("frozen running", func() bool { return strings.HasPrefix(e.statusCell("frozen"), "● ") })
+}
+
+func TestPauseUnavailable(t *testing.T) {
+	tests := []struct {
+		name, state string
+		cs          container.ContainerState
+	}{
+		{"old", "exited", container.StateExited},
+		{"fresh", "created", container.StateCreated},
+		{"boot", "restarting", container.StateRestarting},
+		{"dead", "dead", container.StateDead},
+	}
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			f, _ := sample()
+			if tt.name != "old" {
+				f.AddContainer(ctr(cid(4), tt.name, "alpine", tt.cs, string(tt.cs)))
+			}
+			e := newEnv(t, f, 100, 12)
+			e.press("a")
+			e.selectRow(tt.name)
+			f.ResetCalls()
+			e.press("p")
+			e.waitStatus("pause/unpause is unavailable for a " + tt.state + " container (" + tt.name + ")")
+			e.settle()
+			for _, c := range f.Calls() {
+				if c.Method == dockerfake.MethodContainerPause || c.Method == dockerfake.MethodContainerUnpause {
+					t.Errorf("engine called: %+v", c)
+				}
+			}
+		})
+	}
+}
+
+func TestPauseReportsEngineError(t *testing.T) {
+	f, _ := sample()
+	f.SetError(dockerfake.MethodContainerPause, errors.New("cgroup freezer unavailable"))
+	e := newEnv(t, f, 100, 12)
+	e.selectRow("web")
+	e.press("p")
+	e.waitStatus("pause web: cgroup freezer unavailable")
+	e.settle()
+	if cell := e.statusCell("web"); !strings.HasPrefix(cell, "● Up 5 minutes") || strings.Contains(cell, "Paused") {
+		t.Errorf("web STATUS cell = %q, want it still running", cell)
+	}
+}
+
+func TestPauseRefusedWhileDisconnected(t *testing.T) {
+	f, _ := sample()
+	e := newEnv(t, f, 100, 12)
+	e.selectRow("web")
+	f.Disconnect(errors.New("gone"))
+	e.until("disconnected", func() bool { return e.st.State() == store.StateDisconnected })
+	f.ResetCalls()
+	e.press("p")
+	e.waitStatus("pause web: not connected")
+	if calls := f.CallsTo(dockerfake.MethodContainerPause); len(calls) != 0 {
+		t.Errorf("engine called while disconnected: %+v", calls)
 	}
 }
 
