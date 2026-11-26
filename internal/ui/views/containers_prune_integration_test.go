@@ -13,6 +13,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 
 	"github.com/alexnakagama/drydock/internal/docker"
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 	"github.com/alexnakagama/drydock/internal/store"
 )
 
@@ -50,7 +51,7 @@ func TestIntegrationPruneStoppedContainers(t *testing.T) {
 	exited := dockerRunExited(t, "alpine:latest", "true")
 	running := runTestContainer(t, "alpine:latest")
 
-	svc, err := docker.NewSDKService("drydock-integration-test")
+	svc, err := docker.NewSDKService("drydock-integration-test", dockerctx.DefaultEndpoint())
 	if err != nil {
 		t.Fatal(err)
 	}

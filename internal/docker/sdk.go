@@ -8,15 +8,19 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"net/http"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/jsonstream"
 	"github.com/moby/moby/api/types/volume"
 	"github.com/moby/moby/client"
+
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 )
 
 // localVolumeDriver is the engine's built-in volume driver.
@@ -25,18 +29,37 @@ const localVolumeDriver = "local"
 // SDKService implements Service with the Docker Engine Go SDK.
 type SDKService struct {
 	cli *client.Client
+	ep  dockerctx.Endpoint
 }
 
 var _ Service = (*SDKService)(nil)
 
-// NewSDKService creates a service for the engine configured by the
-// environment: DOCKER_HOST (default: the platform's local socket),
-// DOCKER_TLS_VERIFY and DOCKER_CERT_PATH for TLS, and DOCKER_API_VERSION to
-// pin an API version. Unless pinned, the API version is negotiated with the
-// engine on the first request. No connection is made until a method is
-// called.
-func NewSDKService(userAgent string) (*SDKService, error) {
-	opts := []client.Opt{client.FromEnv}
+// NewSDKService creates a service for the engine of the resolved Docker
+// context ep. No connection is made until a method is called. Unless
+// DOCKER_API_VERSION pins it, the API version is negotiated with the engine
+// on the first request.
+//
+// The default context (including the zero Endpoint) is configured by the
+// environment, as the docker CLI does: DOCKER_HOST (default: the platform's
+// local socket), DOCKER_TLS_VERIFY and DOCKER_CERT_PATH for TLS, and
+// DOCKER_API_VERSION.
+//
+// A named context uses only ep's host and TLS settings; DOCKER_HOST and the
+// TLS environment variables are ignored, and DOCKER_API_VERSION still pins
+// the version. An empty ep.Host means the platform's default socket. With
+// ep.TLS, the pem files named by ep are loaded now, so a missing or invalid
+// file is reported here, naming it.
+func NewSDKService(userAgent string, ep dockerctx.Endpoint) (*SDKService, error) {
+	var opts []client.Opt
+	if ep.IsDefault() {
+		opts = append(opts, client.FromEnv)
+	} else {
+		named, err := namedContextOpts(ep)
+		if err != nil {
+			return nil, fmt.Errorf("configure Docker client for context %q: %w", ep.Context, err)
+		}
+		opts = append(opts, named...)
+	}
 	if userAgent != "" {
 		opts = append(opts, client.WithUserAgent(userAgent))
 	}
@@ -44,8 +67,53 @@ func NewSDKService(userAgent string) (*SDKService, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure Docker client: %w", err)
 	}
-	return &SDKService{cli: cli}, nil
+	return &SDKService{cli: cli, ep: ep}, nil
 }
+
+// defaultSocket is the platform's default engine endpoint. It is a
+// variable so tests can point it at a temporary socket.
+var defaultSocket = client.DefaultDockerHost
+
+// tlsHandshakeTimeout bounds a stalled TLS handshake, as the SDK's own
+// transport does for environment-configured TLS.
+const tlsHandshakeTimeout = 10 * time.Second
+
+// namedContextOpts returns the client options for a named context, in the
+// order they must apply: the TLS HTTP client first, because WithHost
+// configures the dialer of whatever transport is current and WithHTTPClient
+// replaces the transport.
+func namedContextOpts(ep dockerctx.Endpoint) ([]client.Opt, error) {
+	var opts []client.Opt
+	host := ep.Host
+	if ep.TLS {
+		cfg, err := tlsClientConfig(ep)
+		if err != nil {
+			return nil, err
+		}
+		opts = append(opts, client.WithHTTPClient(&http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig:     cfg,
+				TLSHandshakeTimeout: tlsHandshakeTimeout,
+			},
+			CheckRedirect: client.CheckRedirect,
+		}))
+		// The replacement transport has no dialer for the default socket
+		// yet, so it is configured explicitly. This is the SDK's built-in
+		// default, not DOCKER_HOST.
+		if host == "" {
+			host = defaultSocket
+		}
+	}
+	// WithHost("") fails to parse; without WithHost the client keeps its
+	// built-in default socket.
+	if host != "" {
+		opts = append(opts, client.WithHost(host))
+	}
+	return append(opts, client.WithAPIVersionFromEnv()), nil
+}
+
+// Endpoint implements Service.
+func (s *SDKService) Endpoint() dockerctx.Endpoint { return s.ep }
 
 // Host implements Service.
 func (s *SDKService) Host() string { return s.cli.DaemonHost() }

@@ -36,6 +36,7 @@ import (
 	"github.com/moby/moby/client/pkg/versions"
 
 	"github.com/alexnakagama/drydock/internal/docker"
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 )
 
 // Method names a docker.Service method, for error injection and call
@@ -110,6 +111,7 @@ const AnonymousVolumeLabel = "com.docker.volume.anonymous"
 type Service struct {
 	mu sync.Mutex
 
+	endpoint      dockerctx.Endpoint
 	host          string
 	apiVersion    string
 	engineVersion string
@@ -147,6 +149,7 @@ type execState struct {
 // New returns an empty, connected fake.
 func New() *Service {
 	return &Service{
+		endpoint:      dockerctx.DefaultEndpoint(),
 		host:          DefaultHost,
 		apiVersion:    clientAPIVersion,
 		engineVersion: clientAPIVersion,
@@ -166,6 +169,14 @@ func New() *Service {
 
 // ---------------------------------------------------------------------------
 // Test controls
+
+// SetEndpoint sets the resolved context reported by Endpoint. It does not
+// change Host; set both to model a named context.
+func (s *Service) SetEndpoint(ep dockerctx.Endpoint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.endpoint = ep
+}
 
 // SetHost sets the endpoint reported by Host.
 func (s *Service) SetHost(host string) {
@@ -470,6 +481,14 @@ func (s *Service) SetPullScript(ref string, script PullScript) {
 
 // ---------------------------------------------------------------------------
 // docker.Service: connection
+
+// Endpoint implements docker.Service. A new fake reports the default
+// context.
+func (s *Service) Endpoint() dockerctx.Endpoint {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.endpoint
+}
 
 // Host implements docker.Service.
 func (s *Service) Host() string {

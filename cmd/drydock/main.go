@@ -18,6 +18,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/alexnakagama/drydock/internal/docker"
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 	"github.com/alexnakagama/drydock/internal/store"
 	"github.com/alexnakagama/drydock/internal/ui"
 	"github.com/alexnakagama/drydock/internal/ui/views"
@@ -47,7 +48,7 @@ type deps struct {
 func defaultDeps() deps {
 	return deps{
 		newService: func() (docker.Service, error) {
-			return docker.NewSDKService(userAgent())
+			return docker.NewSDKService(userAgent(), dockerctx.DefaultEndpoint())
 		},
 		pingTimeout: pingTimeout,
 	}
@@ -205,7 +206,7 @@ func checkConnection(ctx context.Context, svc docker.Service, stderr io.Writer, 
 	if errors.Is(err, context.DeadlineExceeded) || pctx.Err() != nil {
 		err = context.DeadlineExceeded
 	}
-	_, _ = fmt.Fprintf(stderr, "drydock: %s\n", docker.ConnectErrorMessage(svc.Host(), err, timeout))
+	_, _ = fmt.Fprintf(stderr, "drydock: %s\n", docker.ConnectErrorMessage(svc.Endpoint(), svc.Host(), err, timeout))
 	return exitError, false
 }
 

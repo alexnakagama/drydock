@@ -15,6 +15,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 
 	"github.com/alexnakagama/drydock/internal/docker"
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 	"github.com/alexnakagama/drydock/internal/store"
 )
 
@@ -30,7 +31,7 @@ func TestIntegrationStats(t *testing.T) {
 	// its cleanup runs does not leave a container spinning on the host.
 	id := dockerRun(t, "alpine:latest", "timeout", "-s", "KILL", "120", "sh", "-c", "while :; do :; done")
 
-	svc, err := docker.NewSDKService("drydock-integration-test")
+	svc, err := docker.NewSDKService("drydock-integration-test", dockerctx.DefaultEndpoint())
 	if err != nil {
 		t.Fatal(err)
 	}
