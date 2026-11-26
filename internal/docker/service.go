@@ -47,6 +47,12 @@ type Service interface {
 	ContainerStop(ctx context.Context, id string) error
 	// ContainerRestart restarts a container using the engine's default timeout.
 	ContainerRestart(ctx context.Context, id string) error
+	// ContainerPause freezes the processes of a running container. The engine
+	// refuses (conflict) a container that is not running or already paused.
+	ContainerPause(ctx context.Context, id string) error
+	// ContainerUnpause resumes a paused container. The engine refuses a
+	// container that is not paused (with an internal error, not a conflict).
+	ContainerUnpause(ctx context.Context, id string) error
 	ContainerRemove(ctx context.Context, id string, opts ContainerRemoveOptions) error
 	// ContainerLogs returns the container's raw log stream. For containers
 	// without a TTY the stream is multiplexed and must be demultiplexed with

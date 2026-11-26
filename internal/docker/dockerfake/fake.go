@@ -50,6 +50,8 @@ const (
 	MethodContainerStart     Method = "ContainerStart"
 	MethodContainerStop      Method = "ContainerStop"
 	MethodContainerRestart   Method = "ContainerRestart"
+	MethodContainerPause     Method = "ContainerPause"
+	MethodContainerUnpause   Method = "ContainerUnpause"
 	MethodContainerRemove    Method = "ContainerRemove"
 	MethodContainerLogs      Method = "ContainerLogs"
 	MethodContainerStats     Method = "ContainerStats"
@@ -552,8 +554,10 @@ func (s *Service) ContainerInspect(ctx context.Context, id string) (docker.Conta
 		Image:   c.ImageID,
 		Created: time.Unix(c.Created, 0).UTC().Format(time.RFC3339Nano),
 		State: &container.State{
-			Status:     c.State,
-			Running:    c.State == container.StateRunning,
+			Status: c.State,
+			// Like the engine, a paused or restarting container still counts
+			// as running.
+			Running:    isActive(c.State),
 			Paused:     c.State == container.StatePaused,
 			Restarting: c.State == container.StateRestarting,
 		},
@@ -636,6 +640,60 @@ func (s *Service) ContainerRestart(ctx context.Context, id string) error {
 	s.emitLocked(containerEvent(events.ActionRestart, *c))
 	return nil
 }
+
+// ContainerPause implements docker.Service. Like the engine, it refuses
+// (conflict) a container that is not running, already paused, or restarting.
+// Open stats streams are left alone.
+func (s *Service) ContainerPause(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.beginLocked(ctx, MethodContainerPause, id); err != nil {
+		return err
+	}
+	c, err := s.findContainerLocked(id)
+	if err != nil {
+		return err
+	}
+	switch c.State {
+	case container.StateRunning:
+	case container.StatePaused:
+		return cerrdefs.ErrConflict.WithMessage(fmt.Sprintf("container %s is already paused", c.ID))
+	case container.StateRestarting:
+		return cerrdefs.ErrConflict.WithMessage(fmt.Sprintf("Container %s is restarting, wait until the container is running", c.ID))
+	default:
+		return cerrdefs.ErrConflict.WithMessage(fmt.Sprintf("container %s is not running", c.ID))
+	}
+	c.State = container.StatePaused
+	c.Status = strings.TrimSuffix(c.Status, pausedStatusSuffix) + pausedStatusSuffix
+	s.emitLocked(containerEvent(events.ActionPause, *c))
+	return nil
+}
+
+// ContainerUnpause implements docker.Service. Like the engine, it refuses a
+// container that is not paused. The engine (verified on 29.10) answers that
+// refusal with a 500, not a 409, so the error is internal, not a conflict.
+func (s *Service) ContainerUnpause(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.beginLocked(ctx, MethodContainerUnpause, id); err != nil {
+		return err
+	}
+	c, err := s.findContainerLocked(id)
+	if err != nil {
+		return err
+	}
+	if c.State != container.StatePaused {
+		return cerrdefs.ErrInternal.WithMessage(fmt.Sprintf("Container %s is not paused", c.ID))
+	}
+	c.State = container.StateRunning
+	c.Status = strings.TrimSuffix(c.Status, pausedStatusSuffix)
+	s.emitLocked(containerEvent(events.ActionUnPause, *c))
+	return nil
+}
+
+// pausedStatusSuffix ends the engine's status text of a paused container,
+// as in "Up 5 minutes (Paused)".
+const pausedStatusSuffix = " (Paused)"
 
 // ContainerRemove implements docker.Service.
 func (s *Service) ContainerRemove(ctx context.Context, id string, opts docker.ContainerRemoveOptions) error {

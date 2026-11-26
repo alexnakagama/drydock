@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/client"
@@ -175,6 +176,12 @@ func TestIntegrationRejectsInvalidIdentifiers(t *testing.T) {
 		}
 		t.Errorf("ContainerStats with traversal: err = %v, want invalid argument", err)
 	}
+	if err := svc.ContainerPause(ctx, "../images/x"); !IsInvalidArgument(err) {
+		t.Errorf("ContainerPause with traversal: err = %v, want invalid argument", err)
+	}
+	if err := svc.ContainerUnpause(ctx, "../images/x"); !IsInvalidArgument(err) {
+		t.Errorf("ContainerUnpause with traversal: err = %v, want invalid argument", err)
+	}
 }
 
 // runITContainer starts a labelled alpine:latest container running cmd and
@@ -199,6 +206,76 @@ func runITContainer(t *testing.T, cmd ...string) string {
 	}
 	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
 	return id
+}
+
+// runExitedITContainer creates a labelled alpine:latest container that has
+// run `true` and exited, and removes it when the test ends.
+func runExitedITContainer(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker CLI not found")
+	}
+	c := exec.Command("docker", "run", "-d", "--label", "drydock-it=1", "alpine:latest", "true")
+	var stderr bytes.Buffer
+	c.Stderr = &stderr
+	out, err := c.Output()
+	if err != nil {
+		t.Fatalf("docker run: %v: %s", err, stderr.Bytes())
+	}
+	id := strings.TrimSpace(string(out))
+	if err := ValidateContainerID(id); err != nil {
+		t.Fatalf("docker run printed %q, want a container ID: %v", out, err)
+	}
+	t.Cleanup(func() { _ = exec.Command("docker", "rm", "-f", id).Run() })
+	if out, err := exec.Command("docker", "wait", id).CombinedOutput(); err != nil {
+		t.Fatalf("docker wait: %v: %s", err, out)
+	}
+	return id
+}
+
+func TestIntegrationContainerPauseUnpause(t *testing.T) {
+	svc := newIntegrationService(t)
+	id := runITContainer(t, "sleep", "300")
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+
+	inspectState := func(when string) *container.State {
+		t.Helper()
+		insp, err := svc.ContainerInspect(ctx, id)
+		if err != nil {
+			t.Fatalf("%s: ContainerInspect: %v", when, err)
+		}
+		if insp.Container.State == nil {
+			t.Fatalf("%s: inspect has no State", when)
+		}
+		return insp.Container.State
+	}
+
+	if err := svc.ContainerPause(ctx, id); err != nil {
+		t.Fatalf("ContainerPause: %v", err)
+	}
+	if st := inspectState("after pause"); !st.Paused || !st.Running {
+		t.Errorf("after pause: Running = %v, Paused = %v, want true, true (status %q)", st.Running, st.Paused, st.Status)
+	}
+	if err := svc.ContainerPause(ctx, id); !IsConflict(err) {
+		t.Errorf("pause a paused container: err = %v, want conflict", err)
+	}
+
+	if err := svc.ContainerUnpause(ctx, id); err != nil {
+		t.Fatalf("ContainerUnpause: %v", err)
+	}
+	if st := inspectState("after unpause"); !st.Running || st.Paused {
+		t.Errorf("after unpause: Running = %v, Paused = %v, want true, false", st.Running, st.Paused)
+	}
+	// The engine answers this refusal with a 500, not a 409.
+	if err := svc.ContainerUnpause(ctx, id); !cerrdefs.IsInternal(err) {
+		t.Errorf("unpause a running container: err = %v, want internal", err)
+	}
+
+	exitedID := runExitedITContainer(t)
+	if err := svc.ContainerPause(ctx, exitedID); !IsConflict(err) {
+		t.Errorf("pause an exited container: err = %v, want conflict", err)
+	}
 }
 
 func TestIntegrationContainerStats(t *testing.T) {

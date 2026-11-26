@@ -113,6 +113,24 @@ func (s *SDKService) ContainerRestart(ctx context.Context, id string) error {
 	return err
 }
 
+// ContainerPause implements Service.
+func (s *SDKService) ContainerPause(ctx context.Context, id string) error {
+	if err := ValidateContainerID(id); err != nil {
+		return err
+	}
+	_, err := s.cli.ContainerPause(ctx, id, client.ContainerPauseOptions{})
+	return err
+}
+
+// ContainerUnpause implements Service.
+func (s *SDKService) ContainerUnpause(ctx context.Context, id string) error {
+	if err := ValidateContainerID(id); err != nil {
+		return err
+	}
+	_, err := s.cli.ContainerUnpause(ctx, id, client.ContainerUnpauseOptions{})
+	return err
+}
+
 // ContainerRemove implements Service.
 func (s *SDKService) ContainerRemove(ctx context.Context, id string, opts ContainerRemoveOptions) error {
 	if err := ValidateContainerID(id); err != nil {

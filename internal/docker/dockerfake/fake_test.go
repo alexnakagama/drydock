@@ -6,10 +6,12 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/events"
@@ -150,6 +152,177 @@ func TestContainerLifecycle(t *testing.T) {
 	}
 	if err := f.ContainerStart(ctx, "../images/x"); !docker.IsInvalidArgument(err) {
 		t.Errorf("start with path traversal: err = %v, want invalid argument", err)
+	}
+}
+
+func TestContainerPauseUnpause(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:a"))
+	es := f.Events(ctx)
+
+	state := func(when string) (container.ContainerState, string) {
+		t.Helper()
+		cs, err := f.ContainerList(ctx, docker.ContainerListOptions{All: true})
+		if err != nil || len(cs) != 1 {
+			t.Fatalf("%s: list = %v, %v", when, cs, err)
+		}
+		return cs[0].State, cs[0].Status
+	}
+	expectEvent := func(action events.Action) {
+		t.Helper()
+		m := nextEvent(t, es)
+		if m.Type != events.ContainerEventType || m.Action != action || m.Actor.ID != id || m.Actor.Attributes["name"] != "web" {
+			t.Errorf("event = %s/%s %s %v, want container/%s %s web", m.Type, m.Action, m.Actor.ID, m.Actor.Attributes, action, id)
+		}
+	}
+
+	if err := f.ContainerPause(ctx, "web"); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	expectEvent(events.ActionPause)
+	if st, status := state("after pause"); st != container.StatePaused || status != "Up 1 minute (Paused)" {
+		t.Errorf("after pause: state %q status %q", st, status)
+	}
+	if insp, err := f.ContainerInspect(ctx, id); err != nil || !insp.Container.State.Paused || !insp.Container.State.Running {
+		t.Errorf("after pause: inspect = %+v (%v), want Running and Paused", insp.Container.State, err)
+	}
+	if err := f.ContainerPause(ctx, id); !docker.IsConflict(err) {
+		t.Errorf("pause a paused container: err = %v, want conflict", err)
+	}
+
+	if err := f.ContainerUnpause(ctx, id[:12]); err != nil {
+		t.Fatalf("unpause: %v", err)
+	}
+	expectEvent(events.ActionUnPause)
+	if st, status := state("after unpause"); st != container.StateRunning || status != "Up 1 minute" {
+		t.Errorf("after unpause: state %q status %q", st, status)
+	}
+	if err := f.ContainerUnpause(ctx, id); !cerrdefs.IsInternal(err) {
+		t.Errorf("unpause a running container: err = %v, want internal (the engine's 500)", err)
+	}
+
+	calls := f.CallsTo(MethodContainerPause)
+	if len(calls) != 2 || calls[0].Args[0] != "web" {
+		t.Errorf("ContainerPause calls = %+v", calls)
+	}
+	if n := len(f.CallsTo(MethodContainerUnpause)); n != 2 {
+		t.Errorf("recorded %d ContainerUnpause calls, want 2", n)
+	}
+}
+
+func TestContainerPauseUnpauseErrors(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	old := f.AddContainer(exited("old", "nginx", "sha256:a"))
+	restarting := running("flaky", "nginx", "sha256:a")
+	restarting.State = container.StateRestarting
+	flaky := f.AddContainer(restarting)
+	es := f.Events(ctx)
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+		want func(error) bool
+	}{
+		{"pause exited", func() error { return f.ContainerPause(ctx, old) }, docker.IsConflict},
+		{"unpause exited", func() error { return f.ContainerUnpause(ctx, old) }, cerrdefs.IsInternal},
+		{"pause restarting", func() error { return f.ContainerPause(ctx, flaky) }, docker.IsConflict},
+	} {
+		if err := tc.call(); !tc.want(err) {
+			t.Errorf("%s: err = %v (%T)", tc.name, err, err)
+		}
+	}
+	cs, _ := f.ContainerList(ctx, docker.ContainerListOptions{All: true})
+	for _, c := range cs {
+		if c.State != container.StateExited && c.State != container.StateRestarting {
+			t.Errorf("%s: state changed to %q by a refused call", c.Names[0], c.State)
+		}
+	}
+
+	for _, call := range []func(context.Context, string) error{f.ContainerPause, f.ContainerUnpause} {
+		if err := call(ctx, "missing"); !docker.IsNotFound(err) {
+			t.Errorf("missing container: err = %v, want not found", err)
+		}
+		if err := call(ctx, "../images/x"); !docker.IsInvalidArgument(err) {
+			t.Errorf("path traversal: err = %v, want invalid argument", err)
+		}
+	}
+
+	// A refused call emits nothing: the next event is the one added below.
+	f.AddVolume(volume.Volume{Name: "marker"})
+	if m := nextEvent(t, es); m.Type != events.VolumeEventType || m.Actor.ID != "marker" {
+		t.Errorf("refused calls emitted %s/%s %s", m.Type, m.Action, m.Actor.ID)
+	}
+}
+
+func TestContainerPauseUnpauseDisconnected(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	web := running("web", "nginx", "sha256:a")
+	id := f.AddContainer(web)
+	pausedC := running("db", "pg", "sha256:b")
+	pausedC.State = container.StatePaused
+	db := f.AddContainer(pausedC)
+
+	f.Disconnect(nil)
+	if err := f.ContainerPause(ctx, id); err == nil || docker.ClassifyConnectError(err) != docker.FailureNotRunning {
+		t.Errorf("pause while disconnected: err = %v, want a connection error", err)
+	}
+	if err := f.ContainerUnpause(ctx, db); err == nil || docker.ClassifyConnectError(err) != docker.FailureNotRunning {
+		t.Errorf("unpause while disconnected: err = %v, want a connection error", err)
+	}
+
+	f.Reconnect()
+	cs, _ := f.ContainerList(ctx, docker.ContainerListOptions{All: true})
+	for _, c := range cs {
+		if want := map[string]container.ContainerState{id: container.StateRunning, db: container.StatePaused}[c.ID]; c.State != want {
+			t.Errorf("%s: state %q after disconnected calls, want %q", c.Names[0], c.State, want)
+		}
+	}
+	if err := f.ContainerPause(ctx, id); err != nil {
+		t.Errorf("pause after reconnect: %v", err)
+	}
+}
+
+func TestContainerStopPausedClearsPausedStatus(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:a"))
+	if err := f.ContainerPause(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.ContainerStop(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := f.ContainerList(ctx, docker.ContainerListOptions{All: true})
+	if len(cs) != 1 || cs[0].State != container.StateExited || strings.Contains(cs[0].Status, "Paused") {
+		t.Errorf("after stopping a paused container: %+v", cs)
+	}
+	if insp, err := f.ContainerInspect(ctx, id); err != nil || insp.Container.State.Running || insp.Container.State.Paused {
+		t.Errorf("after stop: inspect = %+v (%v), want neither Running nor Paused", insp.Container.State, err)
+	}
+}
+
+func TestContainerPauseKeepsStatsStream(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(running("web", "nginx", "sha256:a"))
+	st, err := f.ContainerStats(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := f.ContainerPause(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.StatsStreams(); n != 1 {
+		t.Errorf("open stats streams after pause = %d, want 1", n)
 	}
 }
 

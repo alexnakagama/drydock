@@ -2,14 +2,14 @@
 
 ## 1. Engine access: pause and unpause
 
-- [ ] 1.1 In `internal/docker/service.go`, add `ContainerPause(ctx, id string) error` and `ContainerUnpause(ctx, id string) error` to `docker.Service` (design.md D1). Implement them in `internal/docker/sdk.go`:
+- [x] 1.1 In `internal/docker/service.go`, add `ContainerPause(ctx, id string) error` and `ContainerUnpause(ctx, id string) error` to `docker.Service` (design.md D1). Implement them in `internal/docker/sdk.go`:
   - Validate the ID with `ValidateContainerID`, like the other container methods.
   - Return the SDK's errors unwrapped.
 
   Verify:
   - `go build ./...` passes.
   - A new case in `internal/docker/sdk_integration_test.go` (`-tags integration`) uses a labeled `alpine:latest` container running `sleep 300`. Pausing it makes inspect report `Paused: true`. Unpausing makes it report `Running: true, Paused: false`. Pausing an exited container returns a conflict error.
-- [ ] 1.2 In `internal/docker/dockerfake/fake.go`, add `MethodContainerPause` and `MethodContainerUnpause`. Mirror the engine's checks:
+- [x] 1.2 In `internal/docker/dockerfake/fake.go`, add `MethodContainerPause` and `MethodContainerUnpause`. Mirror the engine's checks:
   - Pausing a container that is not running returns a conflict error.
   - Unpausing a container that is not paused returns a conflict error.
   - Unknown IDs return not-found.
