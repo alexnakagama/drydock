@@ -58,6 +58,7 @@ type Endpoint struct {
 	CertDir       string // TLS directory, "" if the context has no TLS files
 	CA, Cert, Key string // paths of the pem files present in CertDir, "" if absent
 	SkipTLSVerify bool
+	ConfigDir     string // absolute config directory the context was read from, "" for default
 }
 
 func (e Endpoint) IsDefault() bool // Context == "" || Context == "default"
@@ -97,20 +98,18 @@ The service keeps the endpoint and exposes it: `Service.Endpoint() dockerctx.End
 
 ### D6. The shell handoff gets the whole endpoint
 
-`execProbeMsg` carries the service's `Endpoint()` and `Host()` instead of the host alone. For the default context, the handoff is unchanged. For a named context, the endpoint travels as the CLI's global flags, placed before `exec`, with the TLS environment removed so it cannot interfere:
+`execProbeMsg` carries the service's `Endpoint()` and `Host()` instead of the host alone. For the default context, the handoff is unchanged. For a named context, the CLI is pointed at the same context store entry drydock read: `--context=<name>` is placed before `exec`, and `DOCKER_CONFIG` is set to the config directory drydock resolved (`Endpoint.ConfigDir`), with the variables that could interfere removed:
 
 | drydock's endpoint | Environment | Global flags before `exec` |
 |---|---|---|
 | default context | `DOCKER_CONTEXT` removed, `DOCKER_HOST=<Host()>`, inherited TLS variables passed through (as today) | none |
-| named, no TLS | `DOCKER_CONTEXT`, `DOCKER_HOST`, `DOCKER_TLS`, `DOCKER_TLS_VERIFY`, `DOCKER_CERT_PATH` removed | `-H <Host()>` |
-| named, TLS, verifying | same removals | `-H <Host()> --tlsverify`, plus `--tlscacert <CA>`, `--tlscert <Cert>`, `--tlskey <Key>` for each file present |
-| named, TLS, skip verify | same removals | `-H <Host()> --tls`, plus `--tlscert`/`--tlskey` when present |
+| named context (any TLS setting) | `DOCKER_CONTEXT`, `DOCKER_HOST`, `DOCKER_TLS`, `DOCKER_TLS_VERIFY`, `DOCKER_CERT_PATH` removed; `DOCKER_CONFIG=<ConfigDir>` | `--context=<name>` |
 
-Flags state exactly which files exist, so a CA-only directory works for the shell as it does for drydock. `DOCKER_CERT_PATH` would make the CLI expect all three files, and whether `DOCKER_TLS` is honored varies between CLI versions. `-H` and the TLS flags are global flags that every supported CLI version accepts, and `-H` overrides any context in the CLI's config.
+The CLI then loads the context's host, TLS files and skip-verify setting from the same files drydock read, so every TLS case drydock supports, including a CA-only directory, a skip-verify context without files, and a client certificate verified against the system roots, works the same way for the shell. `--context` overrides the CLI config's `currentContext`. The `--flag=value` form keeps a name from being read as another flag. A named endpoint without an absolute `ConfigDir` is refused with a status-line error instead of guessing the store.
 
-Known limitation, unchanged by this change: with the default context, `DOCKER_CERT_PATH` set and both `DOCKER_TLS` and `DOCKER_TLS_VERIFY` empty, the SDK uses TLS without verification while the CLI does not use TLS. That is how drydock behaves today; fixing it is left out to keep the default context unchanged.
+What the "same engine" guarantee now rests on: drydock and the CLI read the same `meta.json` and TLS directory. If the context is changed with `docker context update` while drydock runs, the shell follows the new settings; drydock reads the store once, at startup (see Non-Goals).
 
-- *Alternative: pass `--context <name>` to the CLI.* Simpler, but the "same engine" guarantee would then rely on the CLI's own resolution. Passing the resolved endpoint covers every case one way.
+- *Rejected during implementation (task 4.2): the CLI's global flags (`-H`, `--tls`, `--tlsverify`, `--tlscacert`, `--tlscert`, `--tlskey`).* This was the original D6. Checked with CLI 29.10.1: in any TLS mode without `--tlscacert`, the CLI opens `ca.pem` in the config directory (or `DOCKER_CERT_PATH`) and fails with `unable to resolve docker endpoint: open .../ca.pem: no such file or directory` when it is absent, so skip-verify contexts without files and contexts verifying against the system roots could not open a shell. When such a `ca.pem` exists, the CLI silently uses it, and the default `cert.pem`/`key.pem` are picked up the same way, which could present unrelated client credentials to the context's engine. Non-TLS `-H` worked.
 - *Alternative: environment variables only (`DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY`, `DOCKER_TLS`).* Cannot express a partial TLS directory, and depends on `DOCKER_TLS` support.
 
 ### D7. Header indicator
@@ -122,7 +121,8 @@ Known limitation, unchanged by this change: with the default context, `DOCKER_CE
 ## Risks / Trade-offs
 
 - [The context store format changes in a future Docker release] → Unknown JSON fields are ignored, and a missing `Endpoints.docker` gives a `FileError` naming the file instead of a silent fallback. An integration test runs `docker context create` and resolves the result, so CI notices format drift.
-- [The global-flag handoff behaves differently on an old `docker` CLI] → Task 4.2 checks it locally and against the CLI version CI prints with `docker version`, and an integration test opens a shell through a named context.
+- [The `--context` handoff behaves differently on an old `docker` CLI] → Task 4.2 checks it locally and against the CLI version CI prints with `docker version`, and an integration test opens a shell through a named context created with `docker context create`, with `DOCKER_CONTEXT`, `DOCKER_HOST`, `DOCKER_CONFIG` and the store's `currentContext` all pointing elsewhere.
+  *Checked locally with docker CLI 29.10.1 (2026-11-26):* the integration test passes, and fails if either `--context` or `DOCKER_CONFIG` is left out of the handoff. Skip-verify-without-files, cert/key-only and CA-only contexts created with `docker context create` all pass CLI initialization through `--context`. CI's CLI (29.4.2, from the "Docker engine info" step) is checked by the same integration test in CI.
 - [A user relied on drydock ignoring their current context, for example with an unused stale `currentContext`] → After this change, drydock fails at startup naming the context, so the cause is obvious. The README's Requirements section and the changelog (generated from commit messages) call out the behavior change, and `-context default` restores the old behavior.
 - [Partial TLS directories (only `ca.pem`)] → Load what exists in both the SDK and the shell handoff (D6 flags). A lone certificate or key is rejected with a `FileError`.
 - [The behavior of a context with `SkipTLSVerify` and no files] → Based on the CLI's context loader, which was not checked against its source while writing this design. Task 1.3 confirms it with `docker context create ... skip-tls-verify=true` before implementing.

@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/moby/moby/api/types/container"
 
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
 )
 
@@ -79,30 +81,178 @@ func TestProbeShellHonoursContext(t *testing.T) {
 
 func TestExecCommand(t *testing.T) {
 	t.Parallel()
+	// Every case starts from an environment that selects another engine.
 	environ := []string{
 		"PATH=/usr/bin",
 		"DOCKER_HOST=tcp://elsewhere:2376",
 		"DOCKER_CONTEXT=remote",
+		"DOCKER_TLS=1",
 		"DOCKER_TLS_VERIFY=1",
+		"DOCKER_CERT_PATH=/home/u/.docker/elsewhere",
+		"DOCKER_CONFIG=/home/u/.docker-other",
 		"HOME=/home/u",
 		"DOCKER_HOSTNAME=keep-me",
+		"DOCKER_API_VERSION=1.45",
 	}
-	cmd := execCommand("/usr/bin/docker", "unix:///var/run/docker.sock", cid(0), "/bin/sh", environ)
-	if cmd.Path != "/usr/bin/docker" {
-		t.Errorf("Path = %q", cmd.Path)
+	cfgDir := filepath.Join(t.TempDir(), ".docker")
+	// The environment left for a named context: the CLI reads the same
+	// context store as drydock.
+	namedEnv := []string{
+		"PATH=/usr/bin",
+		"HOME=/home/u",
+		"DOCKER_HOSTNAME=keep-me",
+		"DOCKER_API_VERSION=1.45",
+		"DOCKER_CONFIG=" + cfgDir,
 	}
-	if want := []string{"/usr/bin/docker", "exec", "-it", cid(0), "/bin/sh"}; !slices.Equal(cmd.Args, want) {
+	// The default context's environment is passed through, with the host
+	// drydock uses.
+	defaultEnv := func(host string) []string {
+		return []string{
+			"PATH=/usr/bin",
+			"DOCKER_TLS=1",
+			"DOCKER_TLS_VERIFY=1",
+			"DOCKER_CERT_PATH=/home/u/.docker/elsewhere",
+			"DOCKER_CONFIG=/home/u/.docker-other",
+			"HOME=/home/u",
+			"DOCKER_HOSTNAME=keep-me",
+			"DOCKER_API_VERSION=1.45",
+			"DOCKER_HOST=" + host,
+		}
+	}
+	tlsDir := filepath.Join(cfgDir, "contexts", "tls", "abc", "docker")
+	pem := func(name string) string { return filepath.Join(tlsDir, name) }
+	tests := []struct {
+		name      string
+		ep        dockerctx.Endpoint
+		host      string
+		wantFlags []string
+		wantEnv   []string
+	}{
+		{
+			name:    "default context",
+			ep:      dockerctx.DefaultEndpoint(),
+			host:    "unix:///var/run/docker.sock",
+			wantEnv: defaultEnv("unix:///var/run/docker.sock"),
+		},
+		{
+			name:    "zero endpoint is the default context",
+			host:    "tcp://engine:2376",
+			wantEnv: defaultEnv("tcp://engine:2376"),
+		},
+		{
+			name:      "named, no TLS",
+			ep:        dockerctx.Endpoint{Context: "colima", Host: "unix:///Users/me/.colima/default/docker.sock", ConfigDir: cfgDir},
+			host:      "unix:///Users/me/.colima/default/docker.sock",
+			wantFlags: []string{"--context=colima"},
+			wantEnv:   namedEnv,
+		},
+		{
+			name: "named, TLS, verifying",
+			ep: dockerctx.Endpoint{
+				Context: "remote", Host: "tcp://box:2376", TLS: true, CertDir: tlsDir,
+				CA: pem("ca.pem"), Cert: pem("cert.pem"), Key: pem("key.pem"), ConfigDir: cfgDir,
+			},
+			host:      "tcp://box:2376",
+			wantFlags: []string{"--context=remote"},
+			wantEnv:   namedEnv,
+		},
+		{
+			name: "named, TLS, CA only",
+			ep: dockerctx.Endpoint{
+				Context: "remote", Host: "tcp://box:2376", TLS: true, CertDir: tlsDir, CA: pem("ca.pem"), ConfigDir: cfgDir,
+			},
+			host:      "tcp://box:2376",
+			wantFlags: []string{"--context=remote"},
+			wantEnv:   namedEnv,
+		},
+		{
+			name: "named, TLS, skip verify without files",
+			ep: dockerctx.Endpoint{
+				Context: "remote", Host: "tcp://box:2376", TLS: true, SkipTLSVerify: true, ConfigDir: cfgDir,
+			},
+			host:      "tcp://box:2376",
+			wantFlags: []string{"--context=remote"},
+			wantEnv:   namedEnv,
+		},
+		{
+			name:      "named, empty Host",
+			ep:        dockerctx.Endpoint{Context: "local", ConfigDir: cfgDir},
+			host:      "unix:///var/run/docker.sock",
+			wantFlags: []string{"--context=local"},
+			wantEnv:   namedEnv,
+		},
+		{
+			name:      "named, name that looks like a flag",
+			ep:        dockerctx.Endpoint{Context: "--host=tcp://evil:1", Host: "unix:///x.sock", ConfigDir: cfgDir},
+			host:      "unix:///x.sock",
+			wantFlags: []string{"--context=--host=tcp://evil:1"},
+			wantEnv:   namedEnv,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cmd, err := execCommand("/usr/bin/docker", tt.ep, tt.host, cid(0), "/bin/sh", slices.Clone(environ))
+			if err != nil {
+				t.Fatalf("execCommand: %v", err)
+			}
+			if cmd.Path != "/usr/bin/docker" {
+				t.Errorf("Path = %q", cmd.Path)
+			}
+			want := append(append([]string{"/usr/bin/docker"}, tt.wantFlags...), "exec", "-it", cid(0), "/bin/sh")
+			if !slices.Equal(cmd.Args, want) {
+				t.Errorf("Args = %q, want %q", cmd.Args, want)
+			}
+			if !slices.Equal(cmd.Env, tt.wantEnv) {
+				t.Errorf("Env = %q, want %q", cmd.Env, tt.wantEnv)
+			}
+		})
+	}
+}
+
+func TestExecCommandRejectsNamedContextWithoutConfigDir(t *testing.T) {
+	t.Parallel()
+	for _, dir := range []string{"", "relative/.docker"} {
+		ep := dockerctx.Endpoint{Context: "colima", Host: "unix:///x.sock", ConfigDir: dir}
+		if cmd, err := execCommand("/usr/bin/docker", ep, "unix:///x.sock", cid(0), "/bin/sh", nil); err == nil {
+			t.Errorf("ConfigDir %q: execCommand = %q, want an error", dir, cmd.Args)
+		}
+	}
+}
+
+func TestShellUsesNamedContext(t *testing.T) {
+	f, ids := sample()
+	f.SetShells(ids["web"], "/bin/sh")
+	cfgDir := t.TempDir()
+	f.SetEndpoint(dockerctx.Endpoint{Context: "colima", Host: dockerfake.DefaultHost, ConfigDir: cfgDir})
+	e := newEnv(t, f, 100, 12)
+	e.selectRow("web")
+	e.press("x")
+	e.until("shell started", func() bool { return len(e.shells()) == 1 })
+	e.settle()
+
+	cmd := e.shells()[0]
+	if want := []string{"/usr/bin/docker", "--context=colima", "exec", "-it", ids["web"], "/bin/sh"}; !slices.Equal(cmd.Args, want) {
 		t.Errorf("Args = %q, want %q", cmd.Args, want)
 	}
-	want := []string{
-		"PATH=/usr/bin",
-		"DOCKER_TLS_VERIFY=1",
-		"HOME=/home/u",
-		"DOCKER_HOSTNAME=keep-me",
-		"DOCKER_HOST=unix:///var/run/docker.sock",
+	if !slices.Contains(cmd.Env, "DOCKER_CONFIG="+cfgDir) || slices.ContainsFunc(cmd.Env, func(kv string) bool {
+		return strings.HasPrefix(kv, "DOCKER_HOST=") || strings.HasPrefix(kv, "DOCKER_CONTEXT=")
+	}) {
+		t.Errorf("Env = %q", cmd.Env)
 	}
-	if !slices.Equal(cmd.Env, want) {
-		t.Errorf("Env = %q, want %q", cmd.Env, want)
+}
+
+func TestShellNamedContextWithoutConfigDirIsReported(t *testing.T) {
+	f, ids := sample()
+	f.SetShells(ids["web"], "/bin/sh")
+	f.SetEndpoint(dockerctx.Endpoint{Context: "colima", Host: dockerfake.DefaultHost})
+	e := newEnv(t, f, 100, 12)
+	e.selectRow("web")
+	e.press("x")
+	e.waitStatus(`cannot open a shell in web: context "colima" has no absolute config directory`)
+	e.settle()
+	if len(e.shells()) != 0 {
+		t.Error("the TUI was suspended without a usable context store")
 	}
 }
 

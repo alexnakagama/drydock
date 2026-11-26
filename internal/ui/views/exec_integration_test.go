@@ -5,8 +5,13 @@ package views
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,5 +93,121 @@ func TestIntegrationProbeNoShell(t *testing.T) {
 	defer cancel()
 	if got, err := probeShell(ctx, svc, id, probePoll); err != errNoShell {
 		t.Fatalf("probeShell = %q, %v; want errNoShell", got, err)
+	}
+}
+
+// lockedBuffer is a bytes.Buffer safe for one writer and one reader.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestIntegrationShellThroughNamedContext opens an interactive shell with
+// the command drydock builds for a named, non-TLS context created by
+// `docker context create` and pointing at the engine's local socket. The
+// environment the CLI would otherwise follow is wrong in every way:
+// DOCKER_CONTEXT names a context that does not exist, DOCKER_HOST is
+// unreachable, DOCKER_CONFIG names another config directory, and the
+// context store's own config.json selects a missing current context. The
+// shell opens only if the handoff points the CLI at drydock's store and
+// context.
+func TestIntegrationShellThroughNamedContext(t *testing.T) {
+	dockerPath, err := exec.LookPath("docker")
+	if err != nil {
+		t.Skip("docker CLI not found")
+	}
+	def, err := docker.NewSDKService("drydock-integration-test", dockerctx.DefaultEndpoint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = def.Close() })
+	host := def.Host()
+	if !strings.HasPrefix(host, "unix://") {
+		t.Skipf("engine at %s is not a local socket", host)
+	}
+
+	cfgDir := t.TempDir()
+	create := exec.Command(dockerPath, "context", "create", "drydock-it", "--docker", "host="+host)
+	create.Env = append(os.Environ(), "DOCKER_CONFIG="+cfgDir)
+	if out, err := create.CombinedOutput(); err != nil {
+		t.Fatalf("docker context create: %v: %s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.json"), []byte(`{"currentContext": "drydock-it-missing"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ep, err := dockerctx.Resolve(dockerctx.Inputs{Flag: "drydock-it", ConfigDir: cfgDir})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	svc, err := docker.NewSDKService("drydock-integration-test", ep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+
+	id := runTestContainer(t, "alpine:latest")
+	ctx, cancel := context.WithTimeout(t.Context(), probeTimeout)
+	defer cancel()
+	shell, err := probeShell(ctx, svc, id, probePoll)
+	if err != nil {
+		t.Fatalf("probeShell: %v", err)
+	}
+
+	environ := append(os.Environ(),
+		"DOCKER_CONTEXT=drydock-it-missing",
+		"DOCKER_HOST=tcp://127.0.0.1:1",
+		"DOCKER_CONFIG="+t.TempDir(),
+	)
+	cmd, err := execCommand(dockerPath, svc.Endpoint(), svc.Host(), id, shell, environ)
+	if err != nil {
+		t.Fatalf("execCommand: %v", err)
+	}
+	master, slave := openPTY(t)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start %q: %v", cmd.Args, err)
+	}
+	_ = slave.Close() // the CLI holds its own copy; reads then end with EIO
+	var out lockedBuffer
+	copied := make(chan struct{})
+	go func() {
+		defer close(copied)
+		_, _ = io.Copy(&out, master)
+	}()
+	// The expansion proves the shell ran the line: the terminal echoes the
+	// line itself, not its result.
+	if _, err := io.WriteString(master, "echo drydock-$((40+2)); exit\n"); err != nil {
+		t.Fatalf("write to the shell: %v", err)
+	}
+
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	select {
+	case err = <-waited:
+	case <-time.After(30 * time.Second):
+		_ = cmd.Process.Kill()
+		werr := <-waited
+		t.Fatalf("shell did not exit (killed: %v); args %q, output %q", werr, cmd.Args, out.String())
+	}
+	_ = master.Close()
+	<-copied
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
+		t.Fatalf("wait: %v", err)
+	}
+	if err != nil || !strings.Contains(out.String(), "drydock-42") {
+		t.Fatalf("shell through %q: %v; output %q", cmd.Args, err, out.String())
 	}
 }

@@ -35,7 +35,7 @@ None.
 - `internal/docker/service.go`, `internal/docker/dockerfake/fake.go`: the service reports its resolved endpoint (`Endpoint()`) next to `Host()`.
 - `internal/docker/errors.go`: messages that name the context; the permission hint.
 - `cmd/drydock/main.go`: the `-context` flag, resolution before connecting, usage text.
-- `internal/ui/views/exec.go`: for a named context, the shell handoff passes the endpoint and TLS settings as the CLI's `-H` and `--tls*` flags; the default context's handoff is unchanged.
+- `internal/ui/views/exec.go`: for a named context, the shell handoff passes `--context=<name>` with `DOCKER_CONFIG` set to the config directory drydock read, so the CLI loads the same endpoint and TLS settings; the default context's handoff is unchanged.
 - `internal/ui/render.go`: the context indicator in the header.
 - `README.md`: Requirements section (contexts are now honored), the `-context` flag, and the header indicator.
 - Tests: unit tests for resolution precedence, store parsing and failures against temporary config directories, the shell environment, and the header at several widths; an integration test that resolves a context pointing at the CI engine's socket.

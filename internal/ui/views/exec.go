@@ -3,8 +3,11 @@ package views
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 
 	"github.com/alexnakagama/drydock/internal/docker"
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 	"github.com/alexnakagama/drydock/internal/store"
 	"github.com/alexnakagama/drydock/internal/ui"
 )
@@ -57,8 +61,9 @@ type execProbeMsg struct {
 	name        string // container name, for messages
 	containerID string
 	dockerPath  string
-	host        string // engine endpoint drydock uses
-	shell       string // the shell found; "" on error
+	endpoint    dockerctx.Endpoint // resolved context drydock uses
+	host        string             // engine endpoint drydock uses (Service.Host)
+	shell       string             // the shell found; "" on error
 	err         error
 	reason      string // err's display text
 }
@@ -95,16 +100,19 @@ func (v *containersView) shell(c container.Summary) tea.Cmd {
 	return ui.Track("looking for a shell in "+name, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 		defer cancel()
-		var host, shell string
+		var (
+			ep          dockerctx.Endpoint
+			host, shell string
+		)
 		err := st.Do(ctx, func(ctx context.Context, svc docker.Service) error {
-			host = svc.Host()
+			ep, host = svc.Endpoint(), svc.Host()
 			var err error
 			shell, err = probeShell(ctx, svc, id, poll)
 			return err
 		})
 		return execProbeMsg{
 			view: view, name: name, containerID: id, dockerPath: dockerPath,
-			host: host, shell: shell, err: err, reason: st.ErrorText(err),
+			endpoint: ep, host: host, shell: shell, err: err, reason: st.ErrorText(err),
 		}
 	})
 }
@@ -121,7 +129,10 @@ func (v *containersView) startShell(msg execProbeMsg) tea.Cmd {
 	case msg.err != nil:
 		return ui.Error("open shell in " + msg.name + ": " + msg.reason)
 	}
-	cmd := execCommand(msg.dockerPath, msg.host, msg.containerID, msg.shell, v.exec.environ())
+	cmd, err := execCommand(msg.dockerPath, msg.endpoint, msg.host, msg.containerID, msg.shell, v.exec.environ())
+	if err != nil {
+		return ui.Error("cannot open a shell in " + msg.name + ": " + docker.SanitizeText(err.Error()))
+	}
 	view, name, id := v.id, msg.name, msg.containerID
 	run := v.exec.run(cmd, func(err error) tea.Msg { return execDoneMsg{view: view, name: name, containerID: id, err: err} })
 	return ui.Foreground(run, "shell in "+name+" not opened: another view or dialog is in front")
@@ -164,35 +175,83 @@ func (v *containersView) shellDone(msg execDoneMsg) tea.Cmd {
 }
 
 // execCommand builds the command that opens an interactive shell in a
-// container with the docker CLI at dockerPath. The CLI is pointed at host,
-// the engine drydock itself uses: DOCKER_HOST is set to it, and
-// DOCKER_CONTEXT is removed, because the CLI (unlike the SDK) honours
-// contexts and would otherwise reach a different engine.
+// container with the docker CLI at dockerPath. The CLI is pointed at the
+// engine drydock itself uses, described by ep (the service's resolved
+// context) and host (the service's Host), because the CLI resolves contexts
+// and the environment on its own and could otherwise reach another engine:
 //
-// No shell is involved, so the arguments are passed verbatim; containerID
-// must have passed docker.ValidateContainerID, which rules out values the
-// CLI would parse as flags.
-func execCommand(dockerPath, host, containerID, shell string, environ []string) *exec.Cmd {
-	cmd := exec.Command(dockerPath, "exec", "-it", containerID, shell)
-	cmd.Env = execEnviron(environ, host)
-	return cmd
+//   - default context: DOCKER_CONTEXT is removed and DOCKER_HOST is set to
+//     host; the TLS environment variables are passed through, as the SDK
+//     reads the same ones.
+//   - named context: the CLI is given --context=<name> before "exec", with
+//     DOCKER_CONFIG set to the config directory drydock read the context
+//     from, so it loads the same context store entry, TLS material and
+//     verification setting. DOCKER_HOST, DOCKER_CONTEXT and the TLS
+//     environment variables are removed so they cannot interfere.
+//
+// The CLI's own TLS flags are not used for named contexts: in TLS mode the
+// CLI always loads a CA file, falling back to the config directory's
+// ca.pem, so a context with no CA (verifying against the system roots, or
+// skipping verification) could not be expressed with flags.
+//
+// No shell is involved, so the arguments are passed verbatim. The context
+// name is passed as --context=<name>, so it can never be read as another
+// flag; containerID must have passed docker.ValidateContainerID, which
+// rules out values the CLI would parse as flags. A named ep without an
+// absolute ConfigDir is an error rather than a guess at the CLI's store.
+func execCommand(dockerPath string, ep dockerctx.Endpoint, host, containerID, shell string, environ []string) (*exec.Cmd, error) {
+	var args []string
+	if !ep.IsDefault() {
+		if ep.ConfigDir == "" || !filepath.IsAbs(ep.ConfigDir) {
+			return nil, fmt.Errorf("context %q has no absolute config directory", ep.Context)
+		}
+		args = append(args, "--context="+ep.Context)
+	}
+	args = append(args, "exec", "-it", containerID, shell)
+	cmd := exec.Command(dockerPath, args...)
+	cmd.Env = execEnviron(environ, ep, host)
+	return cmd, nil
 }
 
-// execEnviron returns environ without DOCKER_HOST and DOCKER_CONTEXT, with
-// DOCKER_HOST set to host (unless host is empty).
-func execEnviron(environ []string, host string) []string {
+// execEnviron returns the environment for the CLI: environ without the
+// variables that would select an engine other than ep's. For the default
+// context, DOCKER_HOST and DOCKER_CONTEXT are removed and DOCKER_HOST is
+// set to host (unless host is empty). For a named context, DOCKER_TLS,
+// DOCKER_TLS_VERIFY, DOCKER_CERT_PATH and DOCKER_CONFIG are removed too,
+// and DOCKER_CONFIG is set to ep.ConfigDir; the context itself is selected
+// by a flag (see execCommand).
+func execEnviron(environ []string, ep dockerctx.Endpoint, host string) []string {
+	drop := map[string]bool{"DOCKER_HOST": true, "DOCKER_CONTEXT": true}
+	named := !ep.IsDefault()
+	if named {
+		for _, k := range []string{"DOCKER_TLS", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "DOCKER_CONFIG"} {
+			drop[k] = true
+		}
+	}
 	out := make([]string, 0, len(environ)+1)
 	for _, kv := range environ {
 		k, _, _ := strings.Cut(kv, "=")
-		if k == "DOCKER_HOST" || k == "DOCKER_CONTEXT" {
+		if drop[envKey(k)] {
 			continue
 		}
 		out = append(out, kv)
 	}
-	if host != "" {
+	switch {
+	case named:
+		out = append(out, "DOCKER_CONFIG="+ep.ConfigDir)
+	case host != "":
 		out = append(out, "DOCKER_HOST="+host)
 	}
 	return out
+}
+
+// envKey normalizes an environment variable name for comparison: names are
+// case-insensitive on Windows.
+func envKey(k string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToUpper(k)
+	}
+	return k
 }
 
 // probeShell returns the first of shellCandidates that runs in the
