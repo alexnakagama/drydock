@@ -37,6 +37,10 @@ type Endpoint struct {
 	CA, Cert, Key string
 	// SkipTLSVerify disables verification of the engine's certificate.
 	SkipTLSVerify bool
+	// ConfigDir is the absolute CLI config directory the context was read
+	// from, so the docker CLI can be pointed at the same context store. It
+	// is "" for the default context, which is not read from the store.
+	ConfigDir string
 }
 
 // IsDefault reports whether e is the default context, whose endpoint comes

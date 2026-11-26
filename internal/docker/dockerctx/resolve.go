@@ -201,6 +201,7 @@ func readContext(dir, name string) (Endpoint, error) {
 		Context:       name,
 		Host:          docker.Host,
 		SkipTLSVerify: docker.SkipTLSVerify,
+		ConfigDir:     dir,
 	}
 	if err := readTLS(&ep, filepath.Join(dir, "contexts", "tls", hash, "docker")); err != nil {
 		return Endpoint{}, err

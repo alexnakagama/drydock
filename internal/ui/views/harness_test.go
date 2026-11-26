@@ -17,6 +17,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 
 	"github.com/alexnakagama/drydock/internal/docker"
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
 	"github.com/alexnakagama/drydock/internal/store"
 	"github.com/alexnakagama/drydock/internal/ui"
@@ -88,6 +89,8 @@ func newEnvOn(t *testing.T, svc docker.Service, f *dockerfake.Service, width, he
 			}
 		},
 		poll: time.Millisecond,
+		// The context store is unchanged unless a test says otherwise.
+		resolve: func(dockerctx.Inputs) (dockerctx.Endpoint, error) { return svc.Endpoint(), nil },
 	}
 
 	e.st = store.New(svc, func(msg tea.Msg) {

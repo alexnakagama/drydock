@@ -191,8 +191,12 @@ func TestResolvePrecedence(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Resolve: %v", err)
 			}
-			if got != tc.want {
-				t.Errorf("Resolve = %+v, want %+v", got, tc.want)
+			want := tc.want
+			if !want.IsDefault() {
+				want.ConfigDir = dir // the store a named context was read from
+			}
+			if got != want {
+				t.Errorf("Resolve = %+v, want %+v", got, want)
 			}
 		})
 	}
@@ -212,7 +216,7 @@ func TestResolveConfigDir(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Context != "colima" || got.Host != "unix:///custom.sock" {
+		if got.Context != "colima" || got.Host != "unix:///custom.sock" || got.ConfigDir != custom {
 			t.Errorf("Resolve = %+v, want colima under DOCKER_CONFIG", got)
 		}
 	})
@@ -227,7 +231,7 @@ func TestResolveConfigDir(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Context != "colima" || got.Host != "unix:///home.sock" {
+		if got.Context != "colima" || got.Host != "unix:///home.sock" || got.ConfigDir != dir {
 			t.Errorf("Resolve = %+v, want colima under HOME/.docker", got)
 		}
 	})
@@ -242,7 +246,7 @@ func TestResolveConfigDir(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Host != "unix:///override.sock" {
+		if got.Host != "unix:///override.sock" || got.ConfigDir != override {
 			t.Errorf("Resolve = %+v, want the override directory", got)
 		}
 	})
@@ -282,8 +286,8 @@ func TestResolveConfigDir(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !filepath.IsAbs(got.CA) || !filepath.IsAbs(got.CertDir) {
-			t.Errorf("CA %q and CertDir %q, want absolute paths", got.CA, got.CertDir)
+		if !filepath.IsAbs(got.CA) || !filepath.IsAbs(got.CertDir) || !filepath.IsAbs(got.ConfigDir) {
+			t.Errorf("CA %q, CertDir %q and ConfigDir %q, want absolute paths", got.CA, got.CertDir, got.ConfigDir)
 		}
 	})
 
@@ -415,6 +419,7 @@ func TestResolveNamedContext(t *testing.T) {
 			writeContext(t, dir, tc.ctx, tc.host, tc.skipVerify, tc.pems...)
 			want := tc.want
 			want.Context = tc.ctx
+			want.ConfigDir = dir
 			if len(tc.wantPems) > 0 {
 				want.CertDir = tlsDir(dir, tc.ctx)
 			}
