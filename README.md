@@ -73,11 +73,12 @@ This installs into `$(go env GOPATH)/bin`, which must be on your `PATH`.
   tests run in CI, but drydock is not tested against a real engine there.
   Windows is not supported.
 - **Access to a Docker engine socket.** drydock talks to the engine directly
-  through the Docker Engine Go SDK. The endpoint is resolved from
-  `DOCKER_HOST` (with `DOCKER_TLS_VERIFY` and `DOCKER_CERT_PATH` for TLS), or
-  the default local socket `unix:///var/run/docker.sock`. Your user needs
-  permission to use that socket, usually through membership in the `docker`
-  group:
+  through the Docker Engine Go SDK, using the endpoint of the active Docker
+  context (see [Docker contexts](#docker-contexts) below). With the `default`
+  context, the endpoint is `DOCKER_HOST` (with `DOCKER_TLS_VERIFY` and
+  `DOCKER_CERT_PATH` for TLS), or the default local socket
+  `unix:///var/run/docker.sock`. Your user needs permission to use that
+  socket, usually through membership in the `docker` group:
 
   ```sh
   sudo usermod -aG docker "$USER"   # then log out and back in
@@ -95,8 +96,41 @@ This installs into `$(go env GOPATH)/bin`, which must be on your `PATH`.
   hands the terminal to `docker exec -it` to open a shell in a container.
   Everything else works without the CLI.
 
-drydock does not read `docker context` settings. If you use a non-default
-context, set `DOCKER_HOST` to that context's endpoint.
+### Docker contexts
+
+drydock selects the active Docker context once, at startup, with the same
+precedence as the `docker` CLI:
+
+1. the `-context <name>` flag;
+2. the `DOCKER_CONTEXT` environment variable;
+3. the `default` context, when `DOCKER_HOST` is set;
+4. the `currentContext` in the CLI config file, `$DOCKER_CONFIG/config.json`
+   (`~/.docker/config.json` when `DOCKER_CONFIG` is unset);
+5. otherwise, the `default` context.
+
+The `default` context uses `DOCKER_HOST`, `DOCKER_TLS_VERIFY` and
+`DOCKER_CERT_PATH`, or the default local socket. Any other context uses the
+docker endpoint, TLS certificates and TLS verification setting stored for it
+by `docker context create`, under `$DOCKER_CONFIG/contexts`.
+
+drydock exits with status 1, before connecting and without falling back to
+another engine, when:
+
+- the selected context does not exist (run `docker context ls` to list them);
+- the CLI config file (read only when no flag, `DOCKER_CONTEXT` or
+  `DOCKER_HOST` selects a context) or the context's stored files cannot be
+  read or are malformed (the message names the file);
+- the context's docker endpoint uses `ssh://`, which is not supported yet.
+  Forward the remote socket instead (for example with `ssh -L`) and point
+  `DOCKER_HOST` at the local end.
+
+`-version` and `-h` never read the CLI config or the context store, so they
+work even when those files are broken.
+
+> **Behavior change:** earlier versions of drydock ignored `docker context`
+> settings and used only `DOCKER_HOST` or the default socket. A
+> `currentContext` set in the CLI config (for example by `docker context use`)
+> is now honored. To get the previous behavior, run `drydock -context default`.
 
 ## Build and run
 
@@ -215,10 +249,11 @@ the pruned containers' volumes are kept:
 
 Flags:
 
-| Flag       | Description                            |
-|------------|----------------------------------------|
-| `-version` | Print version information and exit.    |
-| `-h`       | Show usage and exit.                   |
+| Flag              | Description                                              |
+|-------------------|----------------------------------------------------------|
+| `-context <name>` | Use the named Docker context (see [Docker contexts](#docker-contexts)). |
+| `-version`        | Print version information and exit.                      |
+| `-h`              | Show usage and exit.                                     |
 
 ## Development
 

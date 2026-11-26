@@ -37,8 +37,12 @@ const pingTimeout = 5 * time.Second
 
 // deps holds what run needs from the outside world, so tests can replace it.
 type deps struct {
-	// newService creates the engine service. It must not connect.
-	newService  func() (docker.Service, error)
+	// resolve selects the active Docker context from the -context flag
+	// value ("" when not given), the environment and the CLI config. It
+	// must not connect.
+	resolve func(flag string) (dockerctx.Endpoint, error)
+	// newService creates the engine service for ep. It must not connect.
+	newService  func(ep dockerctx.Endpoint) (docker.Service, error)
 	pingTimeout time.Duration
 	// programOptions are appended to the TUI program's options; tests use
 	// them to replace the terminal.
@@ -47,8 +51,11 @@ type deps struct {
 
 func defaultDeps() deps {
 	return deps{
-		newService: func() (docker.Service, error) {
-			return docker.NewSDKService(userAgent(), dockerctx.DefaultEndpoint())
+		resolve: func(flag string) (dockerctx.Endpoint, error) {
+			return dockerctx.Resolve(dockerctx.Inputs{Flag: flag})
+		},
+		newService: func(ep dockerctx.Endpoint) (docker.Service, error) {
+			return docker.NewSDKService(userAgent(), ep)
 		},
 		pingTimeout: pingTimeout,
 	}
@@ -97,12 +104,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, d deps) i
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		_, _ = fmt.Fprint(fs.Output(), "Usage: drydock [flags]\n\n"+
-			"A terminal UI for managing a local Docker engine.\n"+
-			"The engine endpoint is taken from DOCKER_HOST, DOCKER_TLS_VERIFY and\n"+
-			"DOCKER_CERT_PATH, or the default local socket.\n\nFlags:\n")
+			"A terminal UI for managing a Docker engine.\n"+
+			"The engine is that of the active Docker context, selected as the docker\n"+
+			"CLI does: -context, then DOCKER_CONTEXT, then the default context when\n"+
+			"DOCKER_HOST is set, then the current context in the CLI config\n"+
+			"($DOCKER_CONFIG/config.json, default ~/.docker/config.json), then the\n"+
+			"default context. The default context uses DOCKER_HOST, DOCKER_TLS_VERIFY\n"+
+			"and DOCKER_CERT_PATH, or the default local socket.\n\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	showVersion := fs.Bool("version", false, "print version information and exit")
+	contextName := fs.String("context", "", "name of the Docker `context` to use (overrides DOCKER_CONTEXT, DOCKER_HOST and the CLI config)")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -126,7 +138,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, d deps) i
 		return exitOK
 	}
 
-	svc, err := d.newService()
+	// The context store is read only now, so -version and -h work even
+	// when the CLI config or the store is broken.
+	ep, err := d.resolve(*contextName)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "drydock: %s\n", docker.ContextErrorMessage(err))
+		return exitError
+	}
+
+	svc, err := d.newService(ep)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "drydock: %s\n", docker.SanitizeText(err.Error()))
 		return exitError

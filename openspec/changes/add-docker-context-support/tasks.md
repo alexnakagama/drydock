@@ -35,12 +35,12 @@
 
 ## 3. Startup wiring (`cmd/drydock`)
 
-- [ ] 3.1 In `cmd/drydock/main.go`, add the `-context` flag and a `deps.resolve` function, call `Resolve` after the `-version`/`-h` returns, print `ContextErrorMessage` and exit 1 on error, and pass the endpoint to `deps.newService`, which becomes `func(dockerctx.Endpoint) (docker.Service, error)` (design.md D4). Update the usage text and the `newService` stubs in `cmd/drydock/main_test.go`. Verify with tests in `cmd/drydock/main_test.go` for:
+- [x] 3.1 In `cmd/drydock/main.go`, add the `-context` flag and a `deps.resolve` function, call `Resolve` after the `-version`/`-h` returns, print `ContextErrorMessage` and exit 1 on error, and pass the endpoint to `deps.newService`, which becomes `func(dockerctx.Endpoint) (docker.Service, error)` (design.md D4). Update the usage text and the `newService` stubs in `cmd/drydock/main_test.go`. Verify with tests in `cmd/drydock/main_test.go` for:
   - `-context nope` exits 1 with the not-found message and never calls `newService`
   - `-version` with a resolver that would fail still exits 0, and the resolver is not called
   - an ssh context exits 1 with the ssh message
   - an unreachable named context's error names the context
-- [ ] 3.2 Update `README.md`:
+- [x] 3.2 Update `README.md`:
   - **Requirements:** replace "drydock does not read `docker context` settings" with the precedence and the ssh limitation.
   - **Flags table:** add `-context`.
   - **Behavior change:** a note in the Requirements section that a `currentContext` set in the CLI config is now honored, and that `-context default` restores the previous behavior. The changelog is generated from commits, so the implementing commit message states this change too.
