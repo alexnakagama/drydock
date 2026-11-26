@@ -84,20 +84,20 @@
 
 ## 5. Documentation and final checks
 
-- [ ] 5.1 Update `README.md`:
+- [x] 5.1 Update `README.md`:
   - Add `p` pause/unpause and `P` prune stopped to the Containers row of the actions table.
   - Add a sentence after the footer paragraph explaining that `p` reads `pause` or `unpause` depending on the selected container.
   - Note in the delete/prune line that container prune keeps volumes and only covers the containers of the current view.
 
   Verify that the README's key table matches `keys.Containers.Bindings()`.
-- [ ] 5.2 Run the full check suite from the README's Development section and verify every command passes with no output from `gofmt -l .`:
+- [x] 5.2 Run the full check suite from the README's Development section and verify every command passes with no output from `gofmt -l .`:
   - `go build ./...`
   - `gofmt -l .`
   - `go vet ./...`
   - `golangci-lint run ./...` and `golangci-lint run --build-tags integration ./...`
   - `go test -race ./...`
   - `go test -tags integration ./...`
-- [ ] 5.3 Run `openspec validate add-container-pause-and-prune --strict` and verify it passes.
+- [x] 5.3 Run `openspec validate add-container-pause-and-prune --strict` and verify it passes.
 
 ## Workflow follow-up
 

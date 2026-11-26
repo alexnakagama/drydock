@@ -5,10 +5,10 @@
 A terminal UI for managing a local Docker engine: containers, images and
 volumes, with live updates from the engine's event stream.
 
-drydock lists, filters and acts on containers (start, stop, restart, delete,
-logs, inspect, shell), images (pull, delete, inspect, prune) and volumes
-(create, delete, inspect, prune). It is pre-1.0: key bindings and behavior
-may still change between minor versions.
+drydock lists, filters and acts on containers (start, stop, pause, restart,
+delete, logs, inspect, shell, prune), images (pull, delete, inspect, prune)
+and volumes (create, delete, inspect, prune). It is pre-1.0: key bindings and
+behavior may still change between minor versions.
 
 ## Install
 
@@ -160,6 +160,10 @@ the footer leaves out `: command` and `q quit`, replaces `? help` with
 lists every key of the current view, with the ones that do not apply right
 now dimmed.
 
+In a containers view, `p` reads `pause` on a running container and `unpause`
+on a paused one, and is hidden for any other state or when nothing is
+selected.
+
 Switching resources replaces the whole view stack, closing any drill-down
 (for example the containers using an image). `Tab`/`Shift+Tab` wrap around.
 Pressing a resource's number while already at its top level does nothing, so
@@ -195,11 +199,16 @@ Global keys and list navigation:
 | `?`               | Help                                                          |
 | `q`               | Quit (Ctrl+C quits from anywhere, even inside a text input)   |
 
-Actions in the resource views. Delete and prune ask for confirmation first:
+Actions in the resource views. Delete and prune ask for confirmation first.
+Container prune removes only the stopped (exited, created or dead) containers
+in the view's scope: every container in the root view, or only the containers
+using that image or volume in a drill-down, including ones hidden by `a` or a
+`/` filter. Running, paused and restarting containers are never removed, and
+the pruned containers' volumes are kept:
 
 | View       | Keys                                                               |
 |------------|--------------------------------------------------------------------|
-| Containers | `s` start/stop, `r` restart, `d` delete, `l` logs, `i` inspect, `x` shell, `a` all/running, `t` stats/ports |
+| Containers | `s` start/stop, `p` pause/unpause, `r` restart, `d` delete, `l` logs, `i` inspect, `x` shell, `a` all/running, `P` prune stopped, `t` stats/ports |
 | Images     | `Enter` containers using it, `p` pull, `d` delete, `i` inspect, `P` prune dangling, `a` all/tagged |
 | Volumes    | `Enter` containers using it, `c` create, `d` delete, `i` inspect, `P` prune unused |
 | Logs       | `G` follow, `/` search, `r` reopen an ended stream                 |
