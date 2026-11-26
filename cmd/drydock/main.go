@@ -186,7 +186,7 @@ func runTUI(ctx context.Context, svc docker.Service, opts []tea.ProgramOption) e
 	// the store never blocks shutdown.
 	var p *tea.Program
 	st := store.New(svc, func(msg tea.Msg) { p.Send(msg) })
-	model := ui.New(views.Resources(st), initialResource)
+	model := newModel(st, svc)
 	defer model.Close()
 
 	// main handles SIGINT and SIGTERM by cancelling ctx, which kills the
@@ -206,6 +206,12 @@ func runTUI(ctx context.Context, svc docker.Service, opts []tea.ProgramOption) e
 	stopStore()
 	<-storeDone
 	return err
+}
+
+// newModel returns the root model on the initial resource, with views
+// backed by st and the header naming the context svc was built for.
+func newModel(st *store.Store, svc docker.Service) *ui.Model {
+	return ui.New(views.Resources(st), initialResource, ui.WithContext(svc.Endpoint().Context))
 }
 
 // checkConnection pings the engine before the TUI takes over the terminal,

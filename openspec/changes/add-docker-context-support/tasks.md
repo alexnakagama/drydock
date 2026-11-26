@@ -54,13 +54,13 @@
 
 ## 5. Header indicator
 
-- [ ] 5.1 Make `ui.New` take variadic options (`ui.New(resources, initial, opts ...Option)`) so existing callers such as `internal/ui/views/harness_test.go` compile unchanged, add the `ui.WithContext(name)` option, and render `ctx:<name>` before the connection state in `headerView`, cleaned and truncated to 20 terminal cells. When the gap is under 10 cells, drop the context first, then shorten the connection state (design.md D7). Pass `ep.Context` from `runTUI`. Verify with tests in `internal/ui/model_test.go`:
+- [x] 5.1 Make `ui.New` take variadic options (`ui.New(resources, initial, opts ...Option)`) so existing callers such as `internal/ui/views/harness_test.go` compile unchanged, add the `ui.WithContext(name)` option, and render `ctx:<name>` before the connection state in `headerView`, cleaned and truncated to 20 terminal cells. When the gap is under 10 cells, drop the context first, then shorten the connection state (design.md D7). Pass `ep.Context` from `runTUI`. Verify with tests in `internal/ui/model_test.go`:
   - `colima` at 100 columns shows `ctx:colima` and `● connected`
   - `default` shows no indicator, and the existing `root_100x30.golden` is unchanged
   - at a width where only one fits, the context is dropped and the full state is kept
   - at a narrower width, only the state symbol remains
   - a 40-character name with an escape sequence comes out truncated and cleaned, and a name of wide (CJK) runes is truncated by cell width
-- [ ] 5.2 Document the header indicator in the README's "Using drydock" section. Verify that the README text matches the "Active context in the header" scenarios.
+- [x] 5.2 Document the header indicator in the README's "Using drydock" section. Verify that the README text matches the "Active context in the header" scenarios.
 
 ## 6. Integration
 

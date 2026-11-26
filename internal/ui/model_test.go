@@ -159,8 +159,8 @@ const (
 func constCount(n int) func(store.Snapshot) int { return func(store.Snapshot) int { return n } }
 
 // newHarnessAt is newHarness starting on the resource named (or aliased)
-// initial.
-func newHarnessAt(t *testing.T, initial string) *harness {
+// initial, with the model configured by opts.
+func newHarnessAt(t *testing.T, initial string, opts ...Option) *harness {
 	t.Helper()
 	h := &harness{t: t, views: map[string][]*listView{}}
 	mk := func(name string, rows ...components.Row) func(store.Snapshot) View {
@@ -178,7 +178,7 @@ func newHarnessAt(t *testing.T, initial string) *harness {
 		)},
 		{Name: "images", Aliases: []string{"im"}, Count: constCount(countImages), New: mk("images", row("i1", "nginx:1.27", "sha256:abc", "180MB"))},
 		{Name: "volumes", Aliases: []string{"vol"}, Count: constCount(countVolumes), New: mk("volumes")},
-	}, initial)
+	}, initial, opts...)
 	h.m.after = func(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
 		h.timers = append(h.timers, timer{d: d, fn: fn})
 		return nil
@@ -359,6 +359,109 @@ func TestConnectionIndicator(t *testing.T) {
 	}
 }
 
+// headerAt renders the model at width and returns the header line with
+// its styling stripped, failing the test unless it is exactly width cells
+// and drawn on the bar background throughout.
+func (h *harness) headerAt(width int) string {
+	h.t.Helper()
+	h.update(tea.WindowSizeMsg{Width: width, Height: 30})
+	line := strings.SplitN(h.m.render(), "\n", 2)[0]
+	if w := ansi.StringWidth(line); w != width {
+		h.t.Errorf("width %d: header is %d cells", width, w)
+	}
+	checkOnBar(h.t, line, width)
+	return ansi.Strip(line)
+}
+
+// TestContextIndicator checks the header's active-context indicator: shown
+// before the connection state for a named context, absent for the default
+// one, and dropped before the connection state is shortened.
+func TestContextIndicator(t *testing.T) {
+	t.Run("named context", func(t *testing.T) {
+		h := newHarnessAt(t, "containers", WithContext("colima"))
+		h.update(store.ConnectionMsg{State: store.StateConnected})
+		want := " drydock > containers" + strings.Repeat(" ", 56) + "ctx:colima ● connected "
+		if got := h.headerAt(100); got != want {
+			t.Errorf("header %q, want %q", got, want)
+		}
+	})
+
+	t.Run("default context", func(t *testing.T) {
+		for _, name := range []string{"", "default"} {
+			h := newHarnessAt(t, "containers", WithContext(name))
+			h.update(store.ConnectionMsg{State: store.StateConnected})
+			want := " drydock > containers" + strings.Repeat(" ", 67) + "● connected "
+			if got := h.headerAt(100); got != want {
+				t.Errorf("WithContext(%q): header %q, want %q", name, got, want)
+			}
+			if strings.Contains(h.header(), "ctx:") {
+				t.Errorf("WithContext(%q): header %q shows a context indicator", name, h.header())
+			}
+		}
+	})
+
+	t.Run("nil option", func(t *testing.T) {
+		h := newHarnessAt(t, "containers", nil, WithContext("colima"), nil)
+		if !strings.Contains(h.header(), "ctx:colima") {
+			t.Errorf("header %q, want ctx:colima", h.header())
+		}
+	})
+
+	t.Run("narrow terminal", func(t *testing.T) {
+		h := newHarnessAt(t, "containers", WithContext("colima"))
+		h.update(store.ConnectionMsg{State: store.StateConnected})
+		for _, tc := range []struct {
+			width int
+			want  string
+		}{
+			// The right side is 22 cells; with the trailing space and
+			// a 10-cell gap for the breadcrumb, both fit from 33 columns.
+			{33, " drydock …ctx:colima ● connected "},
+			// One column less: the context goes, the full state stays.
+			{32, " drydock > containe…● connected "},
+			{22, " drydock …● connected "},
+			// Narrower still: only the state symbol remains.
+			{21, " drydock > contain…● "},
+			{3, "…● "},
+			{1, "●"},
+		} {
+			if got := h.headerAt(tc.width); got != tc.want {
+				t.Errorf("width %d: header %q, want %q", tc.width, got, tc.want)
+			}
+		}
+	})
+
+	t.Run("long or unusual name", func(t *testing.T) {
+		long := "evil\x1b[2J" + strings.Repeat("x", 36) // 40 characters
+		cjk := strings.Repeat("容器", 6)                  // 24 cells
+		for _, tc := range []struct {
+			name, want string
+		}{
+			{long, "ctx:evil\ufffd[2Jxxxxxxxxxxx…"},
+			{cjk, "ctx:容器容器容器容器容…"},
+			{strings.Repeat("y", 20), "ctx:" + strings.Repeat("y", 20)}, // exactly 20: no ellipsis
+			{"\x1b\x07\x9b", "ctx:\ufffd\ufffd\ufffd"},                  // controls only
+			{"prod\u202ekcab", "ctx:prod\ufffdkcab"},                    // bidi override
+			{"two\nlines", "ctx:two lines"},
+		} {
+			h := newHarnessAt(t, "containers", WithContext(tc.name))
+			h.update(store.ConnectionMsg{State: store.StateConnected})
+			out := h.m.render()
+			if strings.Contains(out, "\x1b[2J") || strings.Contains(out, "\x07") || strings.Contains(out, "\u202e") || strings.Contains(out, "\x9b") {
+				t.Errorf("WithContext(%q): control sequence reached the screen", tc.name)
+			}
+			hd := h.headerAt(100)
+			if !strings.HasSuffix(hd, " "+tc.want+" ● connected ") {
+				t.Errorf("WithContext(%q): header %q, want it to end with %q", tc.name, hd, tc.want+" ● connected ")
+			}
+			label := strings.TrimPrefix(tc.want, "ctx:")
+			if w := ansi.StringWidth(label); w > maxContextWidth {
+				t.Errorf("WithContext(%q): name takes %d cells, want at most %d", tc.name, w, maxContextWidth)
+			}
+		}
+	})
+}
+
 // sgrParams returns the parameters of the SGR sequence s starts with, or
 // false if it does not start with one.
 func sgrParams(s string) (string, bool) {
@@ -401,16 +504,26 @@ func TestHeaderBar(t *testing.T) {
 		if w := ansi.StringWidth(line); w != tc.width {
 			t.Errorf("width %d: header is %d cells", tc.width, w)
 		}
-		// Each styled span ends with a reset, so every run between resets
-		// must set the bar background itself.
-		for i, seg := range strings.Split(line, "\x1b[m") {
-			if seg == "" {
-				continue
-			}
-			params, ok := sgrParams(seg)
-			if !ok || !strings.Contains(";"+params+";", ";"+bar+";") {
-				t.Errorf("width %d: header segment %d %q is not on the bar background (%s)", tc.width, i, seg, bar)
-			}
+		checkOnBar(t, line, tc.width)
+	}
+}
+
+// checkOnBar fails the test if any run of the rendered header line, between
+// the full resets each styled span ends with, does not set the header bar
+// background itself.
+func checkOnBar(t *testing.T, line string, width int) {
+	t.Helper()
+	bar, ok := sgrParams(components.Styles.HeaderBar.Render(" "))
+	if !ok || bar == "" {
+		t.Fatalf("HeaderBar renders no SGR sequence: %q", components.Styles.HeaderBar.Render(" "))
+	}
+	for i, seg := range strings.Split(line, "\x1b[m") {
+		if seg == "" {
+			continue
+		}
+		params, ok := sgrParams(seg)
+		if !ok || !strings.Contains(";"+params+";", ";"+bar+";") {
+			t.Errorf("width %d: header segment %d %q is not on the bar background (%s)", width, i, seg, bar)
 		}
 	}
 }

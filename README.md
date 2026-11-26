@@ -161,6 +161,18 @@ go install ./cmd/drydock
 
 ## Using drydock
 
+The header shows where you are on the left, for example
+`drydock > containers`, and the connection state on the right
+(`● connected`). When the active Docker context is not `default`, the
+connection state is preceded by `ctx:<name>`, for example
+`ctx:colima ● connected`, so you always see which engine your actions
+apply to. With the `default` context there is no indicator. Names wider
+than 20 terminal cells are cut with `…`, and control characters in them are
+replaced, so a name can never alter the terminal. When fewer than 10
+columns would be left for the breadcrumb, the context indicator is dropped
+first, keeping the full connection state; only if the breadcrumb is still
+that short is the state shortened to its symbol (`●`).
+
 On terminals at least 5 lines tall, a tab strip below the header lists the
 resources as pills with their counts in parentheses, for example
 `1 containers (12)`, `2 images (34)` and `3 volumes (5)`, and fills the pill
