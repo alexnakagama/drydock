@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/moby/moby/api/types/container"
 
+	"github.com/alexnakagama/drydock/internal/docker"
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
 	"github.com/alexnakagama/drydock/internal/store"
 	"github.com/alexnakagama/drydock/internal/ui"
@@ -65,6 +66,14 @@ type env struct {
 
 func newEnv(t *testing.T, f *dockerfake.Service, width, height int) *env {
 	t.Helper()
+	return newEnvOn(t, f, f, width, height)
+}
+
+// newEnvOn is newEnv on any engine: svc is the engine the store uses, and
+// f, which may be nil, is the fake the test controls (svc itself, if it is
+// a fake). Integration tests pass the real engine and no fake.
+func newEnvOn(t *testing.T, svc docker.Service, f *dockerfake.Service, width, height int) *env {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	e := &env{t: t, f: f, in: make(chan tea.Msg, 256), ctx: ctx, prefs: &Prefs{}}
 	e.logsCfg = defaultLogsConfig()
@@ -81,7 +90,7 @@ func newEnv(t *testing.T, f *dockerfake.Service, width, height int) *env {
 		poll: time.Millisecond,
 	}
 
-	e.st = store.New(f, func(msg tea.Msg) {
+	e.st = store.New(svc, func(msg tea.Msg) {
 		select {
 		case e.in <- msg:
 		case <-ctx.Done():

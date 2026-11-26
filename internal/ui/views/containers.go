@@ -4,15 +4,18 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/go-units"
 	"github.com/moby/moby/api/types/container"
 
@@ -319,6 +322,9 @@ func (v *containersView) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 	if key.Matches(msg, km.Stats) {
 		return v.toggleStats()
+	}
+	if key.Matches(msg, km.Prune) {
+		return v.confirmPrune()
 	}
 	c, ok := v.selected()
 	if !ok {
@@ -740,4 +746,84 @@ func stateName(s container.ContainerState) string {
 		return "unknown"
 	}
 	return components.Clean(string(s))
+}
+
+// containerPruneTimeout bounds a container prune, which removes the
+// previewed containers one by one.
+const containerPruneTimeout = 5 * time.Minute
+
+// errContainerGone reports that a container no longer exists.
+var errContainerGone = errors.New("container no longer exists")
+
+// isStopped reports whether a container is stopped: exited, created or
+// dead. These are the containers a prune removes.
+func isStopped(s container.ContainerState) bool {
+	return s == container.StateExited || s == container.StateCreated || s == container.StateDead
+}
+
+// pruneCandidates returns the stopped containers in the view's scope,
+// sorted by name: every container the view would list in "all" mode,
+// whatever the `a` toggle and the filter.
+func (v *containersView) pruneCandidates() []container.Summary {
+	var cands []container.Summary
+	for _, c := range v.snap.Containers() {
+		if !isStopped(c.State) || (v.match != nil && !v.match(c)) {
+			continue
+		}
+		cands = append(cands, c)
+	}
+	slices.SortFunc(cands, func(a, b container.Summary) int {
+		return cmp.Or(cmp.Compare(store.ContainerName(a), store.ContainerName(b)), cmp.Compare(a.ID, b.ID))
+	})
+	return cands
+}
+
+// confirmPrune previews the stopped containers in the view's scope (see
+// pruneCandidates) and asks before removing them.
+//
+// The engine's own prune decides what to remove when it runs, which could
+// differ from the preview, and cannot express a drill-down's scope.
+// Instead exactly the previewed containers are removed, one by one, by ID
+// and without force: one started meanwhile is refused by the engine and
+// reported, never killed. Their volumes are kept.
+func (v *containersView) confirmPrune() tea.Cmd {
+	if !v.snap.Loaded() {
+		return ui.Error("prune: containers are still loading")
+	}
+	cands := v.pruneCandidates()
+	if len(cands) == 0 {
+		return ui.Success("nothing to prune: no stopped containers")
+	}
+	body := make([]string, 0, len(cands)+2)
+	body = append(body, plural(len(cands), "stopped container", "stopped containers")+" will be removed:")
+	for _, c := range cands {
+		body = append(body, "  "+store.ContainerName(c)+"  "+stateName(c.State))
+	}
+	body = append(body, "Their volumes are kept.")
+	return ui.Confirm("Prune stopped containers?", body,
+		ui.Track("pruning stopped containers", v.st.ActionWith("prune stopped containers", containerPruneTimeout,
+			func(ctx context.Context, svc docker.Service) (string, error) {
+				return containerRemoval(svc).run(ctx, cands)
+			})))
+}
+
+// containerRemoval removes containers one by one by ID, without force and
+// keeping their volumes. IDs are never reused, so unlike volumes no
+// identity check is needed: a container that is no longer there is
+// reported as already gone, and one that started since the preview is
+// refused by the engine.
+func containerRemoval(svc docker.Service) removal[container.Summary] {
+	opts := docker.ContainerRemoveOptions{Force: false, RemoveVolumes: false}
+	return removal[container.Summary]{
+		name: store.ContainerName,
+		remove: func(ctx context.Context, c container.Summary) error {
+			err := svc.ContainerRemove(ctx, c.ID, opts)
+			if cerrdefs.IsNotFound(err) {
+				return fmt.Errorf("%w: %w", errContainerGone, err)
+			}
+			return err
+		},
+		gone: errContainerGone,
+		noun: [2]string{"container", "containers"},
+	}
 }

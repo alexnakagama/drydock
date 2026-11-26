@@ -54,7 +54,7 @@
 
 ## 4. Prune stopped containers
 
-- [ ] 4.1 In `internal/ui/views/containers.go`, add `confirmPrune` (design.md D3, D4):
+- [x] 4.1 In `internal/ui/views/containers.go`, add `confirmPrune` (design.md D3, D4):
   - Candidates: snapshot containers passing `v.match` whose state is `exited`, `created` or `dead`. Ignore `v.all` and the table filter.
   - Sort them by name and list them as `name  state`.
   - End the body with "Their volumes are kept."
@@ -74,8 +74,8 @@
   - already gone
   - nothing to prune
   - still loading
-- [ ] 4.2 Add a golden snapshot of the prune confirmation dialog with three stopped containers in `internal/ui/views/testdata/` (using the views package's `checkGolden`, rewritten with `go test ./internal/ui/views -update`; `internal/ui/testdata/confirm_80x24.golden` belongs to the root model's harness). Verify that `go test ./internal/ui/...` passes and the golden shows the title, the listed containers and "Their volumes are kept."
-- [ ] 4.3 Add an integration test in `internal/ui/views/` (`-tags integration`):
+- [x] 4.2 Add a golden snapshot of the prune confirmation dialog with three stopped containers in `internal/ui/views/testdata/` (using the views package's `checkGolden`, rewritten with `go test ./internal/ui/views -update`; `internal/ui/testdata/confirm_80x24.golden` belongs to the root model's harness). Verify that `go test ./internal/ui/...` passes and the golden shows the title, the listed containers and "Their volumes are kept."
+- [x] 4.3 Add an integration test in `internal/ui/views/` (`-tags integration`):
   - Create two labeled `alpine:latest` containers: one exited, one running `sleep 300`.
   - Open a drill-down for the alpine image and prune.
   - Only the exited one is removed, and the running one is kept.
