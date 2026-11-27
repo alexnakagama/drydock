@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 	"github.com/alexnakagama/drydock/internal/store"
 	"github.com/alexnakagama/drydock/internal/ui/components"
 	"github.com/alexnakagama/drydock/internal/ui/keys"
@@ -85,6 +86,10 @@ type Model struct {
 	snap     store.Snapshot
 	conn     store.ConnectionMsg
 
+	// contextLabel is the header's context indicator text, "ctx:<name>"
+	// with the name cleaned and truncated, or "" for the default context.
+	contextLabel string
+
 	width, height int
 
 	overlay  overlay
@@ -110,15 +115,41 @@ type Model struct {
 	quitting bool
 }
 
+// Option configures a Model built by New.
+type Option func(*Model)
+
+// maxContextWidth is the most terminal cells the context name takes in the
+// header indicator; longer names are truncated with an ellipsis.
+const maxContextWidth = 20
+
+// WithContext makes the header show "ctx:<name>" before the connection
+// state, so the engine that actions apply to is always visible. The name
+// is cleaned of control characters and truncated to maxContextWidth cells.
+// "" and "default" (the environment's engine) show no indicator.
+func WithContext(name string) Option {
+	return func(m *Model) {
+		if name == "" || name == dockerctx.DefaultName {
+			m.contextLabel = ""
+			return
+		}
+		m.contextLabel = "ctx:" + components.Truncate(components.Clean(name), maxContextWidth)
+	}
+}
+
 // New returns the root model with the view stack holding the resource view
-// named initial. It panics if initial is not one of resources, which is a
-// programming error.
-func New(resources []Resource, initial string) *Model {
+// named initial, configured by opts. It panics if initial is not one of
+// resources, which is a programming error.
+func New(resources []Resource, initial string, opts ...Option) *Model {
 	m := &Model{
 		resources: resources,
 		conn:      store.ConnectionMsg{State: store.StateConnecting},
 		command:   components.NewInput(":", strings.Join(resourceNames(resources), " | ")),
 		after:     tea.Tick,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(m)
+		}
 	}
 	i, ok := m.lookupIdx(initial)
 	if !ok {

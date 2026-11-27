@@ -16,10 +16,12 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/alexnakagama/drydock/internal/docker"
 	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
+	"github.com/alexnakagama/drydock/internal/store"
 )
 
 // fakeDeps returns deps backed by f, resolving every run to the default
@@ -477,6 +479,32 @@ func TestSignalExitCode(t *testing.T) {
 	for _, tt := range tests {
 		if got := signalExitCode(tt.sig); got != tt.want {
 			t.Errorf("signalExitCode(%v) = %d, want %d", tt.sig, got, tt.want)
+		}
+	}
+}
+
+// TestNewModelShowsContext checks that the TUI's header names the context
+// the service was built for, and shows nothing for the default context.
+func TestNewModelShowsContext(t *testing.T) {
+	for _, tc := range []struct {
+		ep   dockerctx.Endpoint
+		want bool
+	}{
+		{dockerctx.Endpoint{Context: "colima", Host: "unix:///tmp/colima.sock"}, true},
+		{dockerctx.DefaultEndpoint(), false},
+	} {
+		svc := dockerfake.New()
+		svc.SetEndpoint(tc.ep)
+		st := store.New(svc, func(tea.Msg) {})
+		m := newModel(st, svc)
+		m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+		header := strings.SplitN(ansi.Strip(m.View().Content), "\n", 2)[0]
+		m.Close()
+		if got := strings.Contains(header, "ctx:colima"); got != tc.want {
+			t.Errorf("context %q: header %q, want indicator %v", tc.ep.Context, header, tc.want)
+		}
+		if !tc.want && strings.Contains(header, "ctx:") {
+			t.Errorf("context %q: header %q shows a context indicator", tc.ep.Context, header)
 		}
 	}
 }

@@ -96,8 +96,12 @@ func (m *Model) render() string {
 	return strings.Join(lines[:min(len(lines), m.height)], "\n")
 }
 
-// headerView renders the breadcrumb, the top view's indicators and the
-// connection state on the header bar, which spans the full width. Every
+// headerView renders the breadcrumb, the top view's indicators, the
+// active context (unless it is the default one) and the connection state
+// on the header bar, which spans the full width. While the breadcrumb's
+// gap is under 10 cells, the right side shrinks in steps: first the
+// context indicator is dropped, then the connection state is shortened to
+// its symbol, and as a last resort the breadcrumb goes. Every
 // span in the line, padding included, carries the bar background: each
 // styled span ends with a full reset, so an unstyled space would leave a
 // hole in the bar.
@@ -119,8 +123,17 @@ func (m *Model) headerView() string {
 		left += sp + st.Indicator.Render("["+components.Truncate(components.Clean(ind), 30)+"]")
 	}
 
-	right := m.connectionView(false)
+	state := m.connectionView(false)
+	right := state
+	if m.contextLabel != "" {
+		right = st.Indicator.Render(m.contextLabel) + sp + state
+	}
 	gap := m.width - ansi.StringWidth(right) - 1
+	if gap < 10 && right != state {
+		// Too narrow for both: the connection state matters more.
+		right = state
+		gap = m.width - ansi.StringWidth(right) - 1
+	}
 	if gap < 10 {
 		// Too narrow for the full indicator: keep only its symbol.
 		right = m.connectionView(true)
