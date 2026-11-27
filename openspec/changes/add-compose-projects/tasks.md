@@ -2,11 +2,11 @@
 
 ## 1. Project index in the store
 
-- [ ] 1.1 Add the Compose label constants (`com.docker.compose.project`, `.service`, `.oneoff`, `.project.working_dir`) in `internal/store` and verify `go build ./...` succeeds
-- [ ] 1.2 Add `buildProjects` next to `buildIndexes` (project name to its containers, sorted by name then ID, and a sorted list of project names, ignoring missing and empty labels) and call it where the snapshot is built in `store.go`, leaving `buildIndexes` and its call sites unchanged; verify with unit tests in `snapshot_test.go` covering grouping, unlabeled containers and a project disappearing with its last container
-- [ ] 1.3 Add `Snapshot.Projects()` returning per-project summaries (name, service and one-off containers, running/total over service containers, state running/partial/exited, working dir from the first container in name order) and `Snapshot.NumProjects()`; verify with unit tests for paused-is-not-running, all-paused is partial, only-one-off gives `0/0` exited (not running), and differing working dirs
-- [ ] 1.4 Let `dockerfake` seed containers with Compose labels (a helper or documented `Labels` use in `AddContainer`) and verify a fake-backed store test sees the projects in its snapshot
-- [ ] 1.5 Add a per-container failure hook to `dockerfake` (for example `FailFor(m Method, id string, err error)`, checked where a call starts), since `SetError`/`FailNext` fail by method only and cannot choose among parallel calls; verify with a `fake_test.go` test that only the named container's call fails
+- [x] 1.1 Add the Compose label constants (`com.docker.compose.project`, `.service`, `.oneoff`, `.project.working_dir`) in `internal/store` and verify `go build ./...` succeeds
+- [x] 1.2 Add `buildProjects` next to `buildIndexes` (project name to its containers, sorted by name then ID, and a sorted list of project names, ignoring missing and empty labels) and call it where the snapshot is built in `store.go`, leaving `buildIndexes` and its call sites unchanged; verify with unit tests in `snapshot_test.go` covering grouping, unlabeled containers and a project disappearing with its last container
+- [x] 1.3 Add `Snapshot.Projects()` returning per-project summaries (name, service and one-off containers, running/total over service containers, state running/partial/exited, working dir from the first container in name order) and `Snapshot.NumProjects()`; verify with unit tests for paused-is-not-running, all-paused is partial, only-one-off gives `0/0` exited (not running), and differing working dirs
+- [x] 1.4 Let `dockerfake` seed containers with Compose labels (a helper or documented `Labels` use in `AddContainer`) and verify a fake-backed store test sees the projects in its snapshot
+- [x] 1.5 Add a per-container failure hook to `dockerfake` (for example `FailFor(m Method, id string, err error)`, checked where a call starts), since `SetError`/`FailNext` fail by method only and cannot choose among parallel calls; verify with a `fake_test.go` test that only the named container's call fails
 
 ## 2. Four resource tabs
 

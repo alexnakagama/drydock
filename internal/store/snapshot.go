@@ -38,6 +38,10 @@ type Snapshot struct {
 	// Derived from containers; see buildIndexes.
 	imageUsers  map[string][]container.Summary // image ID -> containers
 	volumeUsers map[string][]container.Summary // volume name -> containers
+
+	// Derived from containers; see buildProjects.
+	projects     map[string][]container.Summary // Compose project name -> containers
+	projectNames []string                       // sorted
 }
 
 // Seq identifies the snapshot. It increases with every snapshot a store

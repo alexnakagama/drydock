@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -897,6 +898,116 @@ func TestDropEventsAndCancel(t *testing.T) {
 			t.Fatal("cancelled subscription was not released")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// FailFor fails only the named container's calls, even among calls made
+// in parallel, and leaves its other methods and other containers alone.
+func TestFailForOneContainer(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	refused := errors.New("refused")
+	setErr := errors.New("set")
+	once := errors.New("once")
+	db := f.AddContainer(running("myapp-db-1", "postgres", "sha256:a"))
+	var others []string
+	for _, n := range []string{"myapp-web-1", "myapp-worker-1", "myapp-cache-1"} {
+		others = append(others, f.AddContainer(running(n, "app", "sha256:b")))
+	}
+	f.FailFor(MethodContainerStop, db, refused)
+
+	ids := append([]string{db}, others...)
+	errs := make([]error, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Go(func() { errs[i] = f.ContainerStop(ctx, id) })
+	}
+	wg.Wait()
+	if !errors.Is(errs[0], refused) {
+		t.Errorf("stop db: err = %v, want %v", errs[0], refused)
+	}
+	for i, err := range errs[1:] {
+		if err != nil {
+			t.Errorf("stop %s: %v", others[i], err)
+		}
+	}
+	states := map[string]container.ContainerState{}
+	for _, c := range mustList(t, f) {
+		states[c.ID] = c.State
+	}
+	if states[db] != container.StateRunning {
+		t.Errorf("refused stop changed db to %s", states[db])
+	}
+	for _, id := range others {
+		if states[id] != container.StateExited {
+			t.Errorf("container %s is %s, want exited", id, states[id])
+		}
+	}
+	if n := len(f.CallsTo(MethodContainerStop)); n != len(ids) {
+		t.Errorf("recorded %d stop calls, want %d", n, len(ids))
+	}
+
+	// Other methods on the same container are unaffected.
+	if err := f.ContainerPause(ctx, db); err != nil {
+		t.Errorf("pause db: %v", err)
+	}
+	// Precedence: FailNext, then FailFor, then SetError.
+	f.SetError(MethodContainerStop, setErr)
+	f.FailNext(MethodContainerStop, once)
+	if err := f.ContainerStop(ctx, db); !errors.Is(err, once) {
+		t.Errorf("with FailNext queued: err = %v, want %v", err, once)
+	}
+	if err := f.ContainerStop(ctx, db); !errors.Is(err, refused) {
+		t.Errorf("FailFor over SetError: err = %v, want %v", err, refused)
+	}
+	if err := f.ContainerStop(ctx, others[0]); !errors.Is(err, setErr) {
+		t.Errorf("other container with SetError: err = %v, want %v", err, setErr)
+	}
+	f.SetError(MethodContainerStop, nil)
+
+	// Clearing with a nil error lets the call through.
+	f.FailFor(MethodContainerStop, db, nil)
+	if err := f.ContainerStop(ctx, db); err != nil {
+		t.Errorf("after clearing: %v", err)
+	}
+	if st := mustList(t, f)[0].State; st != container.StateExited {
+		t.Errorf("db is %s after a stop with FailFor cleared, want exited", st)
+	}
+}
+
+func mustList(t *testing.T, f *Service) []container.Summary {
+	t.Helper()
+	cs, err := f.ContainerList(ctxT(t), docker.ContainerListOptions{All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cs
+}
+
+func TestComposeLabels(t *testing.T) {
+	t.Parallel()
+	got := Compose{Project: "myapp", Service: "web"}.Labels()
+	want := map[string]string{
+		ComposeProjectLabel: "myapp", ComposeServiceLabel: "web", ComposeOneoffLabel: "False",
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("Labels() = %v, want %v", got, want)
+	}
+	got = Compose{Project: "myapp", Service: "web", WorkingDir: "/srv/myapp", OneOff: true}.Labels()
+	if got[ComposeOneoffLabel] != "True" || got[ComposeWorkingDirLabel] != "/srv/myapp" {
+		t.Errorf("one-off Labels() = %v", got)
+	}
+	ctx := ctxT(t)
+	f := New()
+	id := f.AddContainer(container.Summary{Names: []string{"/myapp-web-1"}, Labels: got})
+	got["mutated"] = "x"
+	res, err := f.ContainerInspect(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l := res.Container.Config.Labels; l[ComposeProjectLabel] != "myapp" || l["mutated"] != "" {
+		t.Errorf("stored labels = %v", l)
 	}
 }
 
