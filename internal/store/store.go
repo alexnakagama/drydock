@@ -13,6 +13,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/api/types/volume"
 
 	"github.com/alexnakagama/drydock/internal/docker"
@@ -131,6 +132,7 @@ const (
 	kindContainers kind = iota
 	kindImages
 	kindVolumes
+	kindNetworks
 	numKinds
 )
 
@@ -142,13 +144,15 @@ func (k kind) String() string {
 		return "images"
 	case kindVolumes:
 		return "volumes"
+	case kindNetworks:
+		return "networks"
 	default:
 		return "unknown"
 	}
 }
 
-// Store keeps the engine's containers, images and volumes as immutable
-// snapshots and refreshes them from the engine's event stream.
+// Store keeps the engine's containers, images, volumes and networks as
+// immutable snapshots and refreshes them from the engine's event stream.
 //
 // Run owns all engine state: it performs the initial load, re-lists a kind
 // (debounced) when events for it arrive, and reconnects with capped backoff
@@ -445,10 +449,15 @@ func (s *Store) subscribe(ctx context.Context) (docker.EventStream, error) {
 	return stream, nil
 }
 
+// loadOrder is the order loadAll lists kinds in: networks before
+// containers, so that the network usage index is built once, against the
+// real network list.
+var loadOrder = [numKinds]kind{kindNetworks, kindContainers, kindImages, kindVolumes}
+
 // loadAll lists every kind and builds a fresh snapshot.
 func (s *Store) loadAll(ctx context.Context) (Snapshot, error) {
 	next := Snapshot{}
-	for k := range numKinds {
+	for _, k := range loadOrder {
 		var err error
 		if next, err = s.reload(ctx, next, k); err != nil {
 			return Snapshot{}, err
@@ -457,9 +466,10 @@ func (s *Store) loadAll(ctx context.Context) (Snapshot, error) {
 	return next, nil
 }
 
-// reload returns a copy of base with kind k re-listed from the engine (and
-// the usage and project indexes recomputed if k is containers). base is not
-// modified.
+// reload returns a copy of base with kind k re-listed from the engine, and
+// the indexes derived from it recomputed: the usage and project indexes if
+// k is containers, and the network usage index if k is containers or
+// networks. base is not modified.
 func (s *Store) reload(ctx context.Context, base Snapshot, k kind) (Snapshot, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.callTimeout)
 	defer cancel()
@@ -471,6 +481,7 @@ func (s *Store) reload(ctx context.Context, base Snapshot, k kind) (Snapshot, er
 			base.containers = cs
 			base.imageUsers, base.volumeUsers = buildIndexes(cs)
 			base.projects, base.projectNames = buildProjects(cs)
+			base.networkUsers = buildNetworkUsers(cs, base.networks)
 		}
 	case kindImages:
 		var imgs []image.Summary
@@ -481,6 +492,12 @@ func (s *Store) reload(ctx context.Context, base Snapshot, k kind) (Snapshot, er
 		var vols []volume.Volume
 		if vols, err = s.svc.VolumeList(ctx); err == nil {
 			base.volumes = vols
+		}
+	case kindNetworks:
+		var nets []network.Summary
+		if nets, err = s.svc.NetworkList(ctx); err == nil {
+			base.networks = nets
+			base.networkUsers = buildNetworkUsers(base.containers, nets)
 		}
 	}
 	if err != nil {
@@ -543,8 +560,11 @@ func (s *Store) serve(ctx context.Context, stream docker.EventStream) error {
 			}
 			return fmt.Errorf("event stream: %w", e)
 		case m := <-msgs:
-			if k, ok := eventKind(m); ok {
-				schedule(k)
+			ks := eventKinds(m)
+			for k := range numKinds {
+				if ks.has(k) {
+					schedule(k)
+				}
 			}
 		case <-fire[kindContainers]:
 			err = refresh(kindContainers)
@@ -552,6 +572,8 @@ func (s *Store) serve(ctx context.Context, stream docker.EventStream) error {
 			err = refresh(kindImages)
 		case <-fire[kindVolumes]:
 			err = refresh(kindVolumes)
+		case <-fire[kindNetworks]:
+			err = refresh(kindNetworks)
 		}
 		if err != nil {
 			if ctx.Err() != nil {
@@ -562,33 +584,58 @@ func (s *Store) serve(ctx context.Context, stream docker.EventStream) error {
 	}
 }
 
-// eventKind maps an engine event to the kind it invalidates. Events that
-// cannot change any listed field are ignored.
-func eventKind(m events.Message) (kind, bool) {
+// kindSet is a set of kinds.
+type kindSet uint8
+
+// Every kind must fit in a kindSet.
+var _ [8 - int(numKinds)]struct{}
+
+func kinds(ks ...kind) kindSet {
+	var set kindSet
+	for _, k := range ks {
+		set |= 1 << k
+	}
+	return set
+}
+
+func (s kindSet) has(k kind) bool { return s&(1<<k) != 0 }
+
+// eventKinds maps an engine event to the kinds it invalidates, which is
+// empty for events that cannot change any listed field.
+func eventKinds(m events.Message) kindSet {
 	switch m.Type {
 	case events.ContainerEventType:
 		a := string(m.Action)
 		if strings.HasPrefix(a, "exec_") {
-			return 0, false
+			return 0
 		}
 		switch events.Action(a) {
 		case events.ActionAttach, events.ActionDetach, events.ActionResize, events.ActionTop,
 			events.ActionExport, events.ActionCopy, events.ActionArchivePath, events.ActionExtractToDir:
-			return 0, false
+			return 0
 		}
-		return kindContainers, true
+		return kinds(kindContainers)
 	case events.ImageEventType:
-		return kindImages, true
+		return kinds(kindImages)
 	case events.VolumeEventType:
 		switch m.Action {
 		case events.ActionMount, events.ActionUnmount:
 			// Usage comes from the container list, which container events
 			// already refresh.
-			return 0, false
+			return 0
 		}
-		return kindVolumes, true
+		return kinds(kindVolumes)
+	case events.NetworkEventType:
+		switch m.Action {
+		case events.ActionConnect, events.ActionDisconnect:
+			// Attachments live in the containers' NetworkSettings, and the
+			// engine emits no container event for them, so the container
+			// list is re-listed too.
+			return kinds(kindNetworks, kindContainers)
+		}
+		return kinds(kindNetworks)
 	default:
-		return 0, false
+		return 0
 	}
 }
 

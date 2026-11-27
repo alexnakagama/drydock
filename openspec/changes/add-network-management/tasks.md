@@ -8,9 +8,9 @@
 
 ## 2. Store
 
-- [ ] 2.1 Add networks to `Snapshot` (`Networks()`, `NumNetworks()`) and a `kindNetworks` reload in `store.go` (the `kind` constants and `String`, `reload`, and a `fire[kindNetworks]` case in `serve`); verify with `store_test.go` tests that the first snapshot and a `create`/`destroy` event deliver the network list
-- [ ] 2.2 Build `networkUsers` with a new `buildNetworkUsers(containers, networks)` (network ID -> containers, sorted like the other indexes, nil `NetworkSettings` and endpoints skipped, empty `NetworkID` resolved by name against the network list) whenever containers or networks reload, and add `Snapshot.NetworkUsers(id)`; verify with `snapshot_test.go` tests for running and stopped users, the empty-ID fallback, a recreated same-name network not inheriting users, and a container with `host` network mode, and a container with nil `NetworkSettings`
-- [ ] 2.3 Let `eventKind` return several kinds: network `connect`/`disconnect` refresh networks and containers, other network actions refresh networks; verify with a fake-backed store test where a connect with no other activity changes `NetworkUsers` after one debounce, and that a burst of connects reloads each kind once
+- [x] 2.1 Add networks to `Snapshot` (`Networks()`, `NumNetworks()`) and a `kindNetworks` reload in `store.go` (the `kind` constants and `String`, `reload`, and a `fire[kindNetworks]` case in `serve`); verify with `store_test.go` tests that the first snapshot and a `create`/`destroy` event deliver the network list
+- [x] 2.2 Build `networkUsers` with a new `buildNetworkUsers(containers, networks)` (network ID -> containers, sorted like the other indexes, nil `NetworkSettings` and endpoints skipped, empty `NetworkID` resolved by name against the network list) whenever containers or networks reload, and add `Snapshot.NetworkUsers(id)`; verify with `snapshot_test.go` tests for running and stopped users, the empty-ID fallback, a recreated same-name network not inheriting users, and a container with `host` network mode, and a container with nil `NetworkSettings`
+- [x] 2.3 Let `eventKind` return several kinds: network `connect`/`disconnect` refresh networks and containers, other network actions refresh networks; verify with a fake-backed store test where a connect with no other activity changes `NetworkUsers` after one debounce, and that a burst of connects reloads each kind once
 
 ## 3. Five resource tabs
 

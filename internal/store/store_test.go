@@ -15,6 +15,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/api/types/volume"
 
 	"github.com/alexnakagama/drydock/internal/docker"
@@ -141,12 +142,49 @@ func hasVolume(name string) func(Snapshot) bool {
 	}
 }
 
+func hasNetwork(name string) func(Snapshot) bool {
+	return func(s Snapshot) bool {
+		return slices.ContainsFunc(s.Networks(), func(n network.Summary) bool { return n.Name == name })
+	}
+}
+
+func networkNames(ns []network.Summary) []string {
+	out := make([]string, 0, len(ns))
+	for _, n := range ns {
+		out = append(out, n.Name)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// mustAddNetwork adds a network named name to f and returns its ID.
+func mustAddNetwork(t *testing.T, f *dockerfake.Service, name string) string {
+	t.Helper()
+	id, err := f.AddNetwork(network.Network{Name: name})
+	if err != nil {
+		t.Fatalf("AddNetwork(%s): %v", name, err)
+	}
+	return id
+}
+
+// populated returns a fake with images, a volume, a network, and a running
+// and a stopped container. Its setup is fixed (no testing.T), so it panics
+// if the fake refuses it.
 func populated() *dockerfake.Service {
 	f := dockerfake.New()
 	img := f.AddImage(image.Summary{RepoTags: []string{"app:latest", "app:1.0"}, Size: 100})
 	f.AddImage(image.Summary{Size: 5}) // dangling
 	f.AddVolume(volume.Volume{Name: "pgdata"})
-	f.AddContainer(ctr("", "web", img, container.StateRunning, volMount("pgdata", "/data")))
+	if _, err := f.AddNetwork(network.Network{Name: "app_default"}); err != nil {
+		panic(err)
+	}
+	ns, err := f.NetworkSettings("app_default")
+	if err != nil {
+		panic(err)
+	}
+	web := ctr("", "web", img, container.StateRunning, volMount("pgdata", "/data"))
+	web.NetworkSettings = ns
+	f.AddContainer(web)
 	f.AddContainer(ctr("", "old", img, container.StateExited))
 	return f
 }
@@ -172,6 +210,15 @@ func TestInitialLoad(t *testing.T) {
 	}
 	if len(snap.Images()) != 2 || len(snap.Volumes()) != 1 {
 		t.Errorf("images = %d, volumes = %d; want 2 and 1", len(snap.Images()), len(snap.Volumes()))
+	}
+	if got := networkNames(snap.Networks()); !slices.Equal(got, []string{"app_default", "bridge", "host", "none"}) {
+		t.Errorf("networks = %v, want the predefined ones and app_default", got)
+	}
+	if id, _ := f.NetworkID("app_default"); snap.NetworkUseCount(id) != 1 {
+		t.Errorf("IN USE of app_default = %d, want 1", snap.NetworkUseCount(id))
+	}
+	if n := len(f.CallsTo(dockerfake.MethodNetworkList)); n != 1 {
+		t.Errorf("NetworkList calls = %d, want 1", n)
 	}
 	calls := f.CallsTo(dockerfake.MethodContainerList)
 	if len(calls) != 1 || calls[0].Args[0] != (docker.ContainerListOptions{All: true}) {
@@ -278,8 +325,171 @@ func TestEventsRelistOnlyTheirKind(t *testing.T) {
 	f.ResetCalls()
 	f.AddImage(image.Summary{RepoTags: []string{"alpine:3.20"}})
 	rec.snapshot(t, "image added", func(s Snapshot) bool { return len(s.Images()) == 3 })
-	if n := len(f.CallsTo(dockerfake.MethodContainerList)) + len(f.CallsTo(dockerfake.MethodVolumeList)); n != 0 {
+	if n := len(f.CallsTo(dockerfake.MethodContainerList)) + len(f.CallsTo(dockerfake.MethodVolumeList)) +
+		len(f.CallsTo(dockerfake.MethodNetworkList)); n != 0 {
 		t.Errorf("an image event re-listed other kinds (%d calls)", n)
+	}
+}
+
+func TestNetworkCreateAndDestroyEvents(t *testing.T) {
+	t.Parallel()
+	f := populated()
+	_, rec := start(t, f, testConfig())
+	rec.snapshot(t, "initial", nil)
+	rec.state(t, StateConnected)
+	f.ResetCalls()
+
+	id := mustAddNetwork(t, f, "test-net")
+	snap := rec.snapshot(t, "network created", hasNetwork("test-net"))
+	if got := snap.NumNetworks(); got != 5 {
+		t.Errorf("NumNetworks after create = %d, want 5", got)
+	}
+	if snap.NetworkUseCount(id) != 0 {
+		t.Errorf("new network IN USE = %d, want 0", snap.NetworkUseCount(id))
+	}
+	if len(snap.Containers()) != 2 || len(snap.Images()) != 2 || len(snap.Volumes()) != 1 {
+		t.Error("unchanged kinds were not carried over to the new snapshot")
+	}
+	if appID, _ := f.NetworkID("app_default"); snap.NetworkUseCount(appID) != 1 {
+		t.Error("network usage was lost when only networks were re-listed")
+	}
+	if n := len(f.CallsTo(dockerfake.MethodContainerList)) + len(f.CallsTo(dockerfake.MethodImageList)) +
+		len(f.CallsTo(dockerfake.MethodVolumeList)); n != 0 {
+		t.Errorf("a network create event re-listed other kinds (%d calls)", n)
+	}
+
+	f.ResetCalls()
+	if !f.RemoveNetwork(id) {
+		t.Fatal("RemoveNetwork: network not found")
+	}
+	snap = rec.snapshot(t, "network destroyed", func(s Snapshot) bool { return !hasNetwork("test-net")(s) })
+	if got := snap.NumNetworks(); got != 4 {
+		t.Errorf("NumNetworks after destroy = %d, want 4", got)
+	}
+	if n := len(f.CallsTo(dockerfake.MethodContainerList)); n != 0 {
+		t.Errorf("a network destroy event re-listed containers (%d calls)", n)
+	}
+}
+
+// docker network connect emits only a network event; the store must still
+// see the container's new attachment, with no other engine activity.
+func TestNetworkConnectRefreshesUsers(t *testing.T) {
+	t.Parallel()
+	f := populated()
+	cfg := testConfig()
+	// A long maxWait separates a refresh driven by the debounce from one
+	// that only maxWait would force.
+	cfg.debounce = 50 * time.Millisecond
+	cfg.maxWait = 5 * time.Second
+	_, rec := start(t, f, cfg)
+	rec.snapshot(t, "initial", nil)
+	rec.state(t, StateConnected)
+	id := mustAddNetwork(t, f, "test-net")
+	rec.snapshot(t, "network created", hasNetwork("test-net"))
+	f.ResetCalls()
+
+	connectedAt := time.Now()
+	if err := f.ConnectNetwork("test-net", "web"); err != nil {
+		t.Fatalf("ConnectNetwork: %v", err)
+	}
+	snap := rec.snapshot(t, "web connected", func(s Snapshot) bool { return s.NetworkUseCount(id) == 1 })
+	if got := containerNames(snap.NetworkUsers(id)); !slices.Equal(got, []string{"web"}) {
+		t.Errorf("NetworkUsers(test-net) = %v, want [web]", got)
+	}
+	// The debounce, not maxWait or a later unrelated event, brought it.
+	if waited := time.Since(connectedAt); waited >= cfg.maxWait/2 {
+		t.Errorf("connect took %v to show, want well under maxWait (%v); debounce is %v",
+			waited, cfg.maxWait, cfg.debounce)
+	}
+	if n := len(f.CallsTo(dockerfake.MethodContainerList)); n != 1 {
+		t.Errorf("ContainerList calls after connect = %d, want 1", n)
+	}
+	if n := len(f.CallsTo(dockerfake.MethodNetworkList)); n != 1 {
+		t.Errorf("NetworkList calls after connect = %d, want 1", n)
+	}
+
+	if err := f.DisconnectNetwork("test-net", "web"); err != nil {
+		t.Fatalf("DisconnectNetwork: %v", err)
+	}
+	rec.snapshot(t, "web disconnected", func(s Snapshot) bool { return s.NetworkUseCount(id) == 0 })
+}
+
+func TestNetworkConnectBurstReloadsEachKindOnce(t *testing.T) {
+	t.Parallel()
+	const n = 20
+	f := populated()
+	for i := range n {
+		f.AddContainer(ctr("", fmt.Sprintf("c%02d", i), "", container.StateRunning))
+	}
+	// A debounce long enough that a scheduling pause on a loaded machine
+	// cannot split the burst into two refreshes; maxWait stays above it.
+	cfg := testConfig()
+	cfg.debounce = 300 * time.Millisecond
+	cfg.maxWait = 5 * time.Second
+	_, rec := start(t, f, cfg)
+	rec.snapshot(t, "initial", func(s Snapshot) bool { return s.NumContainers() == n+2 })
+	rec.state(t, StateConnected)
+	id := mustAddNetwork(t, f, "burst")
+	rec.snapshot(t, "network created", hasNetwork("burst"))
+	f.ResetCalls()
+
+	for i := range n {
+		if err := f.ConnectNetwork("burst", fmt.Sprintf("c%02d", i)); err != nil {
+			t.Fatalf("ConnectNetwork: %v", err)
+		}
+	}
+	rec.snapshot(t, "burst connected", func(s Snapshot) bool { return s.NetworkUseCount(id) == n })
+	// Image events refreshed one after the other are sentinels: by the
+	// second refresh, any extra re-list the burst had scheduled would have
+	// run.
+	for range 2 {
+		f.Emit(events.Message{Type: events.ImageEventType, Action: events.ActionTag})
+		rec.snapshot(t, "sentinel", nil)
+	}
+
+	if got := len(f.CallsTo(dockerfake.MethodContainerList)); got != 1 {
+		t.Errorf("ContainerList called %d times for a burst of connects, want 1", got)
+	}
+	if got := len(f.CallsTo(dockerfake.MethodNetworkList)); got != 1 {
+		t.Errorf("NetworkList called %d times for a burst of connects, want 1", got)
+	}
+	if got := len(f.CallsTo(dockerfake.MethodVolumeList)); got != 0 {
+		t.Errorf("connect events re-listed volumes (%d calls)", got)
+	}
+}
+
+func TestEventKinds(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		m    events.Message
+		want []kind
+	}{
+		{events.Message{Type: events.ContainerEventType, Action: events.ActionStart}, []kind{kindContainers}},
+		{events.Message{Type: events.ContainerEventType, Action: events.ActionExecStart}, nil},
+		{events.Message{Type: events.ContainerEventType, Action: events.ActionAttach}, nil},
+		{events.Message{Type: events.ImageEventType, Action: events.ActionPull}, []kind{kindImages}},
+		{events.Message{Type: events.VolumeEventType, Action: events.ActionCreate}, []kind{kindVolumes}},
+		{events.Message{Type: events.VolumeEventType, Action: events.ActionMount}, nil},
+		{events.Message{Type: events.NetworkEventType, Action: events.ActionCreate}, []kind{kindNetworks}},
+		{events.Message{Type: events.NetworkEventType, Action: events.ActionDestroy}, []kind{kindNetworks}},
+		{events.Message{Type: events.NetworkEventType, Action: events.ActionRemove}, []kind{kindNetworks}},
+		{events.Message{Type: events.NetworkEventType, Action: events.ActionPrune}, []kind{kindNetworks}},
+		{events.Message{Type: events.NetworkEventType, Action: events.ActionConnect}, []kind{kindContainers, kindNetworks}},
+		{events.Message{Type: events.NetworkEventType, Action: events.ActionDisconnect}, []kind{kindContainers, kindNetworks}},
+		{events.Message{Type: events.PluginEventType, Action: events.ActionEnable}, nil},
+		{events.Message{}, nil},
+	}
+	for _, tt := range tests {
+		ks := eventKinds(tt.m)
+		var got []kind
+		for k := range numKinds {
+			if ks.has(k) {
+				got = append(got, k)
+			}
+		}
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("eventKinds(%s %s) = %v, want %v", tt.m.Type, tt.m.Action, got, tt.want)
+		}
 	}
 }
 
@@ -333,7 +543,7 @@ func TestIrrelevantEventsAreIgnored(t *testing.T) {
 		{Type: events.ContainerEventType, Action: events.ActionResize},
 		{Type: events.VolumeEventType, Action: events.ActionMount},
 		{Type: events.VolumeEventType, Action: events.ActionUnmount},
-		{Type: events.NetworkEventType, Action: events.ActionConnect},
+		{Type: events.PluginEventType, Action: events.ActionCreate},
 	} {
 		f.Emit(m)
 	}
@@ -465,6 +675,7 @@ func TestRecoversAfterEventStreamDrop(t *testing.T) {
 	for _, m := range []dockerfake.Method{
 		dockerfake.MethodPing, dockerfake.MethodEvents,
 		dockerfake.MethodContainerList, dockerfake.MethodImageList, dockerfake.MethodVolumeList,
+		dockerfake.MethodNetworkList,
 	} {
 		if n := len(f.CallsTo(m)); n != 1 {
 			t.Errorf("%s called %d times during recovery, want 1", m, n)

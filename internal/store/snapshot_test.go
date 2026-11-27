@@ -8,6 +8,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/api/types/volume"
 
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
@@ -116,7 +117,8 @@ func TestZeroSnapshot(t *testing.T) {
 		t.Error("zero snapshot reports Loaded")
 	}
 	if len(snap.Containers()) != 0 || len(snap.Images()) != 0 || len(snap.Volumes()) != 0 ||
-		snap.ImageUseCount("x") != 0 || snap.VolumeUseCount("x") != 0 {
+		len(snap.Networks()) != 0 || snap.ImageUseCount("x") != 0 || snap.VolumeUseCount("x") != 0 ||
+		snap.NetworkUseCount("x") != 0 || len(snap.NetworkUsers("x")) != 0 {
 		t.Error("zero snapshot is not empty")
 	}
 }
@@ -143,7 +145,7 @@ func TestContainerNameAndShortID(t *testing.T) {
 func TestSnapshotCounts(t *testing.T) {
 	t.Parallel()
 	var zero Snapshot
-	if n := zero.NumContainers() + zero.NumImages() + zero.NumVolumes(); n != 0 {
+	if n := zero.NumContainers() + zero.NumImages() + zero.NumVolumes() + zero.NumNetworks(); n != 0 {
 		t.Errorf("zero Snapshot counts sum to %d, want 0", n)
 	}
 
@@ -154,8 +156,9 @@ func TestSnapshotCounts(t *testing.T) {
 			ctr("2", "old", "sha256:a", container.StateExited),
 			ctr("3", "new", "sha256:b", container.StateCreated),
 		},
-		images:  []image.Summary{{ID: "sha256:a"}, {ID: "sha256:b"}, {ID: "sha256:c"}, {ID: "sha256:d"}},
-		volumes: []volume.Volume{{Name: "data"}, {Name: "cache"}},
+		images:   []image.Summary{{ID: "sha256:a"}, {ID: "sha256:b"}, {ID: "sha256:c"}, {ID: "sha256:d"}},
+		volumes:  []volume.Volume{{Name: "data"}, {Name: "cache"}},
+		networks: []network.Summary{netSummary("n1", "bridge"), netSummary("n2", "host"), netSummary("n3", "none"), netSummary("n4", "app")},
 	}
 	if got, want := snap.NumContainers(), len(snap.Containers()); got != want || got != 3 {
 		t.Errorf("NumContainers() = %d, want len(Containers()) = %d (3)", got, want)
@@ -165,6 +168,183 @@ func TestSnapshotCounts(t *testing.T) {
 	}
 	if got, want := snap.NumVolumes(), len(snap.Volumes()); got != want || got != 2 {
 		t.Errorf("NumVolumes() = %d, want len(Volumes()) = %d (2)", got, want)
+	}
+	if got, want := snap.NumNetworks(), len(snap.Networks()); got != want || got != 4 {
+		t.Errorf("NumNetworks() = %d, want len(Networks()) = %d (4)", got, want)
+	}
+}
+
+// --- Networks -------------------------------------------------------
+
+func netSummary(id, name string) network.Summary {
+	return network.Summary{Network: network.Network{ID: id, Name: name}}
+}
+
+// attached returns c with one endpoint per pair of network name and ID; an
+// empty ID is how the engine lists a container that was never started.
+func attached(c container.Summary, nameIDs ...string) container.Summary {
+	if len(nameIDs)%2 != 0 {
+		panic("attached: nameIDs must be pairs of network name and ID")
+	}
+	c.NetworkSettings = &container.NetworkSettingsSummary{Networks: map[string]*network.EndpointSettings{}}
+	for i := 0; i < len(nameIDs); i += 2 {
+		c.NetworkSettings.Networks[nameIDs[i]] = &network.EndpointSettings{NetworkID: nameIDs[i+1]}
+	}
+	return c
+}
+
+func networkSnapshot(cs []container.Summary, ns []network.Summary) Snapshot {
+	return Snapshot{seq: 1, containers: cs, networks: ns, networkUsers: buildNetworkUsers(cs, ns)}
+}
+
+func TestBuildNetworkUsers(t *testing.T) {
+	t.Parallel()
+	const appID, oldAppID, hostID, otherID = "app-new", "app-old", "host-id", "other-id"
+	ns := []network.Summary{netSummary(appID, "app"), netSummary(hostID, "host"), netSummary(otherID, "other")}
+
+	hostMode := attached(ctr("6", "hostmode", "", container.StateRunning), "host", hostID)
+	hostMode.HostConfig.NetworkMode = "host"
+	nilEndpoint := ctr("8", "nilep", "", container.StateRunning)
+	nilEndpoint.NetworkSettings = &container.NetworkSettingsSummary{
+		Networks: map[string]*network.EndpointSettings{"app": nil, "other": {NetworkID: otherID}},
+	}
+	cs := []container.Summary{
+		attached(ctr("1", "web", "", container.StateRunning), "app", appID, "other", otherID),
+		attached(ctr("2", "db", "", container.StateExited), "app", appID),
+		// Created but never started: known only by name.
+		attached(ctr("3", "fresh", "", container.StateCreated), "app", ""),
+		// Attached to an earlier network named "app", since removed and
+		// recreated: it does not count toward the new one.
+		attached(ctr("4", "stale", "", container.StateExited), "app", oldAppID),
+		// Never started, on a network that no longer exists.
+		attached(ctr("5", "orphan", "", container.StateCreated), "gone", ""),
+		hostMode,
+		ctr("7", "nosettings", "", container.StateRunning), // nil NetworkSettings
+		nilEndpoint,
+	}
+	snap := networkSnapshot(cs, ns)
+
+	if got := containerNames(snap.NetworkUsers(appID)); !slices.Equal(got, []string{"db", "fresh", "web"}) {
+		t.Errorf("NetworkUsers(app) = %v, want sorted [db fresh web] (running, stopped, never started)", got)
+	}
+	if got := snap.NetworkUseCount(appID); got != 3 {
+		t.Errorf("NetworkUseCount(app) = %d, want 3", got)
+	}
+	if got := containerNames(snap.NetworkUsers(hostID)); !slices.Equal(got, []string{"hostmode"}) {
+		t.Errorf("NetworkUsers(host) = %v, want [hostmode]", got)
+	}
+	if got := containerNames(snap.NetworkUsers(otherID)); !slices.Equal(got, []string{"nilep", "web"}) {
+		t.Errorf("NetworkUsers(other) = %v, want [nilep web]", got)
+	}
+	if got := snap.NetworkUseCount(""); got != 0 {
+		t.Errorf("endpoints without a resolvable network are indexed under \"\": %d", got)
+	}
+	if got := snap.NetworkUseCount("missing"); got != 0 {
+		t.Errorf("NetworkUseCount(missing) = %d, want 0", got)
+	}
+
+	// AttachedToNetwork applies the same rule as the index.
+	for _, n := range ns {
+		var want []string
+		for _, c := range cs {
+			if AttachedToNetwork(c, n.ID, n.Name) {
+				want = append(want, ContainerName(c))
+			}
+		}
+		slices.Sort(want)
+		if got := containerNames(snap.NetworkUsers(n.ID)); !slices.Equal(got, want) {
+			t.Errorf("%s: NetworkUsers = %v, AttachedToNetwork = %v", n.Name, got, want)
+		}
+	}
+	if AttachedToNetwork(cs[3], appID, "app") {
+		t.Error("AttachedToNetwork counts an endpoint of a removed same-name network")
+	}
+	if !AttachedToNetwork(cs[3], oldAppID, "app") {
+		t.Error("AttachedToNetwork misses an endpoint by ID")
+	}
+	if AttachedToNetwork(cs[2], "", "app") {
+		t.Error("AttachedToNetwork matches an empty network ID")
+	}
+}
+
+// A network recreated with the same name picks up a never-started
+// container by name, but not a container attached to the old one by ID.
+func TestNetworkUsersAfterRecreate(t *testing.T) {
+	t.Parallel()
+	cs := []container.Summary{
+		attached(ctr("1", "started", "", container.StateExited), "app", "old"),
+		attached(ctr("2", "created", "", container.StateCreated), "app", ""),
+	}
+	before := networkSnapshot(cs, []network.Summary{netSummary("old", "app")})
+	if got := containerNames(before.NetworkUsers("old")); !slices.Equal(got, []string{"created", "started"}) {
+		t.Errorf("before: users = %v", got)
+	}
+	after := networkSnapshot(cs, []network.Summary{netSummary("new", "app")})
+	if got := containerNames(after.NetworkUsers("new")); !slices.Equal(got, []string{"created"}) {
+		t.Errorf("after recreate: users = %v, want [created]", got)
+	}
+}
+
+// The engine keeps names unique, but if two networks shared one, a
+// never-started container known only by that name counts toward both, so
+// neither is pruned while it may need it, and AttachedToNetwork agrees.
+func TestNetworkUsersDuplicateName(t *testing.T) {
+	t.Parallel()
+	ns := []network.Summary{netSummary("n1", "dup"), netSummary("n2", "dup")}
+	cs := []container.Summary{
+		attached(ctr("1", "created", "", container.StateCreated), "dup", ""),
+		attached(ctr("2", "started", "", container.StateExited), "dup", "n2"),
+	}
+	snap := networkSnapshot(cs, ns)
+	if got := containerNames(snap.NetworkUsers("n1")); !slices.Equal(got, []string{"created"}) {
+		t.Errorf("NetworkUsers(n1) = %v, want [created]", got)
+	}
+	if got := containerNames(snap.NetworkUsers("n2")); !slices.Equal(got, []string{"created", "started"}) {
+		t.Errorf("NetworkUsers(n2) = %v, want [created started]", got)
+	}
+	for _, n := range ns {
+		if !AttachedToNetwork(cs[0], n.ID, n.Name) {
+			t.Errorf("AttachedToNetwork(created, %s) = false, want true", n.ID)
+		}
+	}
+	if AttachedToNetwork(cs[1], "n1", "dup") {
+		t.Error("AttachedToNetwork matches an endpoint by name although it carries another ID")
+	}
+}
+
+func TestNetworkAccessorsReturnCopies(t *testing.T) {
+	t.Parallel()
+	cs := []container.Summary{
+		attached(ctr("1", "b", "", container.StateRunning), "app", "n1"),
+		attached(ctr("2", "a", "", container.StateRunning), "app", "n1"),
+	}
+	snap := networkSnapshot(cs, []network.Summary{netSummary("n1", "app"), netSummary("n2", "other")})
+
+	nets := snap.Networks()
+	nets[0].Name = "mutated"
+	if snap.Networks()[0].Name != "app" {
+		t.Error("modifying the result of Networks changed the snapshot")
+	}
+	users := snap.NetworkUsers("n1")
+	users[0] = container.Summary{}
+	if ContainerName(snap.NetworkUsers("n1")[0]) != "a" {
+		t.Error("modifying the result of NetworkUsers changed the snapshot")
+	}
+}
+
+func TestBuildNetworkUsersEmpty(t *testing.T) {
+	t.Parallel()
+	if got := buildNetworkUsers(nil, []network.Summary{netSummary("n1", "app")}); len(got) != 0 {
+		t.Errorf("no containers: index = %v", got)
+	}
+	// Without a network list, IDs still index; names cannot resolve.
+	cs := []container.Summary{
+		attached(ctr("1", "a", "", container.StateRunning), "app", "n1"),
+		attached(ctr("2", "b", "", container.StateCreated), "app", ""),
+	}
+	got := buildNetworkUsers(cs, nil)
+	if len(got) != 1 || len(got["n1"]) != 1 {
+		t.Errorf("no networks: index = %v, want only n1 -> [a]", got)
 	}
 }
 
