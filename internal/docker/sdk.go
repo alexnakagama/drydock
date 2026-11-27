@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/jsonstream"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/api/types/volume"
 	"github.com/moby/moby/client"
 
@@ -348,6 +350,36 @@ func (s *SDKService) VolumeRemove(ctx context.Context, name string, opts VolumeR
 	return err
 }
 
+// NetworkList implements Service.
+func (s *SDKService) NetworkList(ctx context.Context) ([]network.Summary, error) {
+	res, err := s.cli.NetworkList(ctx, client.NetworkListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return res.Items, nil
+}
+
+// NetworkInspect implements Service.
+func (s *SDKService) NetworkInspect(ctx context.Context, id string) (NetworkInspectResult, error) {
+	if err := ValidateNetworkID(id); err != nil {
+		return NetworkInspectResult{}, err
+	}
+	res, err := s.cli.NetworkInspect(ctx, id, client.NetworkInspectOptions{})
+	if err != nil {
+		return NetworkInspectResult{}, err
+	}
+	return NetworkInspectResult{Network: res.Network, Raw: res.Raw}, nil
+}
+
+// NetworkRemove implements Service.
+func (s *SDKService) NetworkRemove(ctx context.Context, id string) error {
+	if err := ValidateNetworkID(id); err != nil {
+		return err
+	}
+	_, err := s.cli.NetworkRemove(ctx, id, client.NetworkRemoveOptions{})
+	return err
+}
+
 // ExecCreate implements Service.
 func (s *SDKService) ExecCreate(ctx context.Context, containerID string, cmd []string) (string, error) {
 	if err := ValidateContainerID(containerID); err != nil {
@@ -384,11 +416,22 @@ func (s *SDKService) ExecInspect(ctx context.Context, execID string) (ExecInspec
 	return ExecInspectResult{Running: res.Running, ExitCode: res.ExitCode, Pid: res.PID}, nil
 }
 
+// eventTypes are the event types Events subscribes to.
+var eventTypes = []string{
+	string(events.ContainerEventType),
+	string(events.ImageEventType),
+	string(events.VolumeEventType),
+	string(events.NetworkEventType),
+}
+
+// eventsOptions returns the options of the Events subscription.
+func eventsOptions() client.EventsListOptions {
+	return client.EventsListOptions{Filters: make(client.Filters).Add("type", eventTypes...)}
+}
+
 // Events implements Service.
 func (s *SDKService) Events(ctx context.Context) EventStream {
-	res := s.cli.Events(ctx, client.EventsListOptions{
-		Filters: make(client.Filters).Add("type", "container", "image", "volume"),
-	})
+	res := s.cli.Events(ctx, eventsOptions())
 	return EventStream{Messages: res.Messages, Err: res.Err}
 }
 

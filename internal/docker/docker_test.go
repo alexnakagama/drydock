@@ -8,12 +8,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"math/big"
 	"net"
 	"net/http"
@@ -53,6 +55,117 @@ func TestValidateContainerID(t *testing.T) {
 		if err := ValidateContainerID(s); !IsInvalidArgument(err) {
 			t.Errorf("ValidateContainerID(%q) = %v, want invalid argument", s, err)
 		}
+	}
+}
+
+func TestValidateNetworkID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		id    string
+		valid bool
+	}{
+		{"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", true},
+		{"7d86d31b1478", true},              // short ID
+		{"x2r1khfx0m7kzuwm6yvi1ub3h", true}, // Swarm network ID
+		{"myapp_default", true},
+		{"", false},
+		{"..", false},
+		{"../containers/x", false},
+		{"a/b", false},
+		{"/bridge", false},
+		{"net?x=1", false},
+		{"net#x", false},
+		{"net%2f", false},
+		{"-net", false},
+		{".net", false},
+		{"a b", false},
+		{"a\nb", false},
+		{"a\x00b", false},
+		{"ü", false},
+		{strings.Repeat("a", 255), true},
+		{strings.Repeat("a", 256), false},
+	}
+	for _, tt := range tests {
+		err := ValidateNetworkID(tt.id)
+		if tt.valid && err != nil {
+			t.Errorf("ValidateNetworkID(%q) = %v, want nil", tt.id, err)
+		}
+		if !tt.valid && !IsInvalidArgument(err) {
+			t.Errorf("ValidateNetworkID(%q) = %v, want invalid argument", tt.id, err)
+		}
+	}
+}
+
+// TestNetworkMethodsRejectInvalidIDs checks that an invalid network ID never
+// reaches the engine.
+func TestNetworkMethodsRejectInvalidIDs(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	setStrayDockerEnv(t)
+	svc := newTestService(t, dockerctx.Endpoint{Context: "test", Host: "tcp://" + srv.Listener.Addr().String()})
+	ctx := t.Context()
+	for _, id := range []string{"", "../containers/x", "a/b", "x?force=1"} {
+		if _, err := svc.NetworkInspect(ctx, id); !IsInvalidArgument(err) {
+			t.Errorf("NetworkInspect(%q) = %v, want invalid argument", id, err)
+		}
+		if err := svc.NetworkRemove(ctx, id); !IsInvalidArgument(err) {
+			t.Errorf("NetworkRemove(%q) = %v, want invalid argument", id, err)
+		}
+	}
+	if n := requests.Load(); n != 0 {
+		t.Errorf("the engine received %d requests, want 0", n)
+	}
+}
+
+// TestEventsSubscribesToNetworkEvents checks the type filter the SDK
+// service sends with its event subscription.
+func TestEventsSubscribesToNetworkEvents(t *testing.T) {
+	filters := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/_ping"):
+			w.Header().Set("Api-Version", "1.47")
+			_, _ = io.WriteString(w, "OK")
+		case strings.HasSuffix(r.URL.Path, "/events"):
+			select {
+			case filters <- r.URL.Query().Get("filters"):
+			default:
+			}
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	setStrayDockerEnv(t)
+	svc := newTestService(t, dockerctx.Endpoint{Context: "test", Host: "tcp://" + srv.Listener.Addr().String()})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	es := svc.Events(ctx)
+	var raw string
+	select {
+	case raw = <-filters:
+	case err := <-es.Err:
+		t.Fatalf("event stream ended: %v", err)
+	case <-ctx.Done():
+		t.Fatal("the engine received no event subscription")
+	}
+	cancel()
+
+	var got map[string]map[string]bool
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("filters = %q: %v", raw, err)
+	}
+	want := map[string]map[string]bool{"type": {"container": true, "image": true, "volume": true, "network": true}}
+	if !maps.EqualFunc(got, want, maps.Equal) {
+		t.Errorf("event filters = %v, want %v", got, want)
 	}
 }
 

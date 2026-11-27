@@ -35,9 +35,9 @@ import (
 
 // These tests run against the engine configured by the environment
 // (DOCKER_HOST or the default socket): go test -tags integration ./...
-// They only create volumes named "drydock-it-*" and containers labelled
-// drydock-it=1 (with the docker CLI, from alpine:latest, which must be present
-// or pullable), and remove them afterwards.
+// They only create volumes and networks named "drydock-it-*" and containers
+// labelled drydock-it=1 (with the docker CLI, from alpine:latest, which must
+// be present or pullable), and remove them afterwards.
 
 func newIntegrationService(t *testing.T) *SDKService {
 	t.Helper()
@@ -54,6 +54,8 @@ func newIntegrationService(t *testing.T) *SDKService {
 	return svc
 }
 
+// testVolumeName returns a unique "drydock-it-*" name, for a volume or a
+// network.
 func testVolumeName(t *testing.T) string {
 	t.Helper()
 	b := make([]byte, 6)
@@ -172,6 +174,95 @@ func TestIntegrationVolumeLifecycleAndEvents(t *testing.T) {
 	}
 }
 
+func TestIntegrationNetworkLifecycleAndEvents(t *testing.T) {
+	svc := newIntegrationService(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	name := testVolumeName(t)
+
+	evctx, evcancel := context.WithCancel(ctx)
+	defer evcancel()
+	es := svc.Events(evctx)
+
+	// Service has no create; the test creates the network with the SDK.
+	created, err := svc.cli.NetworkCreate(ctx, name, client.NetworkCreateOptions{
+		Driver: "bridge",
+		Labels: map[string]string{"drydock-it": "1"},
+	})
+	if err != nil {
+		t.Fatalf("NetworkCreate: %v", err)
+	}
+	id := created.ID
+	t.Cleanup(func() {
+		cctx, ccancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer ccancel()
+		if err := svc.NetworkRemove(cctx, id); err != nil && !IsNotFound(err) {
+			t.Errorf("cleanup: remove network %s: %v", name, err)
+		}
+	})
+	if err := ValidateNetworkID(id); err != nil {
+		t.Fatalf("engine network ID %q: %v", id, err)
+	}
+	waitForEvent(t, es, events.NetworkEventType, events.ActionCreate, id)
+
+	nets, err := svc.NetworkList(ctx)
+	if err != nil {
+		t.Fatalf("NetworkList: %v", err)
+	}
+	var listed, bridge bool
+	for _, n := range nets {
+		listed = listed || (n.ID == id && n.Name == name && n.Driver == "bridge")
+		bridge = bridge || n.Name == "bridge"
+	}
+	if !listed || !bridge {
+		t.Errorf("NetworkList includes %s: %v, bridge: %v", name, listed, bridge)
+	}
+
+	insp, err := svc.NetworkInspect(ctx, id)
+	if err != nil {
+		t.Fatalf("NetworkInspect: %v", err)
+	}
+	if insp.Network.ID != id || insp.Network.Name != name || insp.Network.Labels["drydock-it"] != "1" {
+		t.Errorf("inspected network = %+v", insp.Network.Network)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(insp.Raw, &raw); err != nil || raw["Id"] != id {
+		t.Errorf("raw inspect = %s (%v)", insp.Raw, err)
+	}
+
+	// The engine refuses, with permission denied rather than a conflict, a
+	// network a running container is connected to and its predefined
+	// networks; dockerfake models the same errors.
+	runID := runITContainer(t, "sleep", "300")
+	if _, err := svc.cli.NetworkConnect(ctx, id, client.NetworkConnectOptions{Container: runID}); err != nil {
+		t.Fatalf("NetworkConnect: %v", err)
+	}
+	if err := svc.NetworkRemove(ctx, id); !cerrdefs.IsPermissionDenied(err) {
+		t.Errorf("remove a network with a running container: err = %v, want permission denied", err)
+	}
+	if _, err := svc.cli.NetworkDisconnect(ctx, id, client.NetworkDisconnectOptions{Container: runID}); err != nil {
+		t.Fatalf("NetworkDisconnect: %v", err)
+	}
+	for _, n := range nets {
+		if n.Name == "bridge" {
+			if err := svc.NetworkRemove(ctx, n.ID); !cerrdefs.IsPermissionDenied(err) {
+				t.Errorf("remove the bridge network: err = %v, want permission denied", err)
+			}
+		}
+	}
+
+	if err := svc.NetworkRemove(ctx, id); err != nil {
+		t.Fatalf("NetworkRemove: %v", err)
+	}
+	waitForEvent(t, es, events.NetworkEventType, events.ActionDestroy, id)
+	if err := svc.NetworkRemove(ctx, id); !IsNotFound(err) {
+		t.Errorf("second NetworkRemove: err = %v, want not found", err)
+	}
+	if _, err := svc.NetworkInspect(ctx, id); !IsNotFound(err) {
+		t.Errorf("inspect removed network: err = %v, want not found", err)
+	}
+}
+
 func TestIntegrationRejectsInvalidIdentifiers(t *testing.T) {
 	svc := newIntegrationService(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -193,6 +284,12 @@ func TestIntegrationRejectsInvalidIdentifiers(t *testing.T) {
 	}
 	if err := svc.ContainerUnpause(ctx, "../images/x"); !IsInvalidArgument(err) {
 		t.Errorf("ContainerUnpause with traversal: err = %v, want invalid argument", err)
+	}
+	if err := svc.NetworkRemove(ctx, "../containers/x"); !IsInvalidArgument(err) {
+		t.Errorf("NetworkRemove with traversal: err = %v, want invalid argument", err)
+	}
+	if _, err := svc.NetworkInspect(ctx, "../volumes/x"); !IsInvalidArgument(err) {
+		t.Errorf("NetworkInspect with traversal: err = %v, want invalid argument", err)
 	}
 }
 

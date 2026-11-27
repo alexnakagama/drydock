@@ -1,9 +1,11 @@
 // Package dockerfake provides an in-memory docker.Service for tests.
 //
-// The fake keeps containers, images and volumes in memory and applies the
-// same rules the engine does for the operations drydock uses (for example,
-// a running container cannot be removed without force, and removing an
-// image reference that shares its image with other tags only untags it).
+// The fake keeps containers, images, volumes and networks in memory and
+// applies the same rules the engine does for the operations drydock uses
+// (for example, a running container cannot be removed without force,
+// removing an image reference that shares its image with other tags only
+// untags it, and a network a running container is connected to cannot be
+// removed).
 // Mutations emit engine-style events to subscribers, and tests can inject
 // errors, drop the connection, script image pulls, and feed container logs
 // and stats samples.
@@ -13,13 +15,16 @@ package dockerfake
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"iter"
 	"maps"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync"
@@ -32,6 +37,7 @@ import (
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/jsonstream"
 	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/api/types/volume"
 	"github.com/moby/moby/client/pkg/versions"
 
@@ -65,6 +71,9 @@ const (
 	MethodVolumeInspect      Method = "VolumeInspect"
 	MethodVolumeCreate       Method = "VolumeCreate"
 	MethodVolumeRemove       Method = "VolumeRemove"
+	MethodNetworkList        Method = "NetworkList"
+	MethodNetworkInspect     Method = "NetworkInspect"
+	MethodNetworkRemove      Method = "NetworkRemove"
 	MethodExecCreate         Method = "ExecCreate"
 	MethodExecStart          Method = "ExecStart"
 	MethodExecInspect        Method = "ExecInspect"
@@ -163,6 +172,7 @@ type Service struct {
 	tty        map[string]bool
 	images     []image.Summary
 	volumes    []volume.Volume
+	networks   []network.Network // insertion order
 	logs       map[string]*logBuffer
 	shells     map[string]map[string]bool
 	execs      map[string]*execState
@@ -188,9 +198,11 @@ type execState struct {
 	pid         int
 }
 
-// New returns an empty, connected fake.
+// New returns a connected fake with no containers, images or volumes, and
+// the engine's predefined networks (see PredefinedNetworks).
 func New() *Service {
 	return &Service{
+		networks:      predefinedNetworks(time.Now().UTC()),
 		endpoint:      dockerctx.DefaultEndpoint(),
 		host:          DefaultHost,
 		apiVersion:    clientAPIVersion,
@@ -537,6 +549,194 @@ func (s *Service) RemoveVolume(name string) bool {
 	s.volumes = slices.Delete(s.volumes, i, i+1)
 	s.emitLocked(volumeEvent(events.ActionDestroy, name))
 	return true
+}
+
+// Names of the networks the engine predefines, which every new fake has
+// and which cannot be removed through the Service.
+const (
+	BridgeNetwork = "bridge"
+	HostNetwork   = "host"
+	NoneNetwork   = "none"
+)
+
+// PredefinedNetworks are the names of the engine's predefined networks.
+var PredefinedNetworks = []string{BridgeNetwork, HostNetwork, NoneNetwork}
+
+// PredefinedNetworkID returns the ID a new fake gives the predefined
+// network name, or "" if name is not one. IDs are stable across fakes.
+func PredefinedNetworkID(name string) string {
+	if !slices.Contains(PredefinedNetworks, name) {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("dockerfake network " + name))
+	return hex.EncodeToString(sum[:])
+}
+
+// AddNetwork adds n, or replaces the network with the same ID, and emits a
+// "create" network event. A zero ID gets a generated one, which is returned.
+// Like the engine, names are unique: a network whose name another network
+// already has is refused with a conflict, as are an empty name and an ID
+// that docker.ValidateNetworkID rejects. Empty Driver and Scope get
+// "bridge" and "local", and a zero Created the current time.
+//
+// Containers are attached through their NetworkSettings (see
+// NetworkSettings) or with ConnectNetwork.
+func (s *Service) AddNetwork(n network.Network) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n.Name == "" {
+		return "", cerrdefs.ErrInvalidArgument.WithMessage("network name is empty")
+	}
+	if n.ID == "" {
+		n.ID = s.newIDLocked()
+	} else if err := docker.ValidateNetworkID(n.ID); err != nil {
+		return "", err
+	}
+	if i := s.networkByNameLocked(n.Name); i >= 0 && s.networks[i].ID != n.ID {
+		return "", cerrdefs.ErrConflict.WithMessage(fmt.Sprintf("network with name %s already exists", n.Name))
+	}
+	n = completeNetwork(n)
+	if i := s.networkIndexLocked(n.ID); i >= 0 {
+		s.networks[i] = n
+	} else {
+		s.networks = append(s.networks, n)
+	}
+	s.emitLocked(networkEvent(events.ActionCreate, n, nil))
+	return n.ID, nil
+}
+
+// RemoveNetwork removes the network with the given ID as an external client
+// would, and emits a "destroy" event. It reports whether the network
+// existed. Unlike NetworkRemove, it removes predefined networks and
+// networks with running containers too. Like the engine, it leaves the
+// containers' NetworkSettings as they are: their endpoints keep the removed
+// network's name and ID.
+func (s *Service) RemoveNetwork(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.networkIndexLocked(id)
+	if i < 0 {
+		return false
+	}
+	n := s.networks[i]
+	s.networks = slices.Delete(s.networks, i, i+1)
+	s.emitLocked(networkEvent(events.ActionDestroy, n, nil))
+	return true
+}
+
+// NetworkID returns the ID of the network with the given name.
+func (s *Service) NetworkID(name string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.networkByNameLocked(name)
+	if i < 0 {
+		return "", false
+	}
+	return s.networks[i].ID, true
+}
+
+// NetworkSettings returns the NetworkSettings of a started container
+// attached to the named networks, for AddContainer: one endpoint per
+// network, keyed by its name and carrying its ID and a new endpoint ID. It
+// fails with not found if a network does not exist. For a container that
+// was created but never started, pass the result to WithoutNetworkIDs.
+func (s *Service) NetworkSettings(names ...string) (*container.NetworkSettingsSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ns := &container.NetworkSettingsSummary{Networks: make(map[string]*network.EndpointSettings, len(names))}
+	for _, name := range names {
+		i := s.networkByNameLocked(name)
+		if i < 0 {
+			return nil, noSuchNetwork(name)
+		}
+		ns.Networks[name] = &network.EndpointSettings{NetworkID: s.networks[i].ID, EndpointID: s.newIDLocked()}
+	}
+	return ns, nil
+}
+
+// WithoutNetworkIDs returns a copy of ns whose endpoints have no network or
+// endpoint ID, which is how the engine lists a container that was created
+// but never started. Its networks are then known only by name.
+func WithoutNetworkIDs(ns *container.NetworkSettingsSummary) *container.NetworkSettingsSummary {
+	if ns == nil {
+		return nil
+	}
+	out := &container.NetworkSettingsSummary{Networks: make(map[string]*network.EndpointSettings, len(ns.Networks))}
+	for name, ep := range ns.Networks {
+		ep = ep.Copy()
+		if ep != nil {
+			ep.NetworkID, ep.EndpointID = "", ""
+		}
+		out.Networks[name] = ep
+	}
+	return out
+}
+
+// ConnectNetwork connects a container to a network as `docker network
+// connect` does, and emits only a "connect" network event: like the
+// engine, no container event. The network is a full ID, a name or a unique
+// ID prefix, and the container a full ID, a name or a unique ID prefix. It
+// fails with not found if either does not exist, and, like the engine,
+// with permission denied if the container is already connected to the
+// network.
+func (s *Service) ConnectNetwork(networkRef, containerRef string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, err := s.findNetworkLocked(networkRef)
+	if err != nil {
+		return err
+	}
+	c, err := s.findContainerLocked(containerRef)
+	if err != nil {
+		return err
+	}
+	_, attached := attachment(*c, *n)
+	if !attached && c.NetworkSettings != nil {
+		// An endpoint already stored under the name (for example one left
+		// by a removed network of that name) is never overwritten.
+		_, attached = c.NetworkSettings.Networks[n.Name]
+	}
+	if attached {
+		return cerrdefs.ErrPermissionDenied.WithMessage(fmt.Sprintf(
+			"endpoint with name %s already exists in network %s", primaryName(*c), n.Name))
+	}
+	// The stored container shares nothing with the summaries handed out
+	// (see cloneContainer), so it is updated in place.
+	if c.NetworkSettings == nil {
+		c.NetworkSettings = &container.NetworkSettingsSummary{}
+	}
+	if c.NetworkSettings.Networks == nil {
+		c.NetworkSettings.Networks = map[string]*network.EndpointSettings{}
+	}
+	c.NetworkSettings.Networks[n.Name] = &network.EndpointSettings{NetworkID: n.ID, EndpointID: s.newIDLocked()}
+	s.emitLocked(networkEvent(events.ActionConnect, *n, c))
+	return nil
+}
+
+// DisconnectNetwork disconnects a container from a network as `docker
+// network disconnect` does, and emits only a "disconnect" network event.
+// References resolve as for ConnectNetwork. It fails with not found if
+// either does not exist, and, like the engine, with an internal error if
+// the container is not connected to the network.
+func (s *Service) DisconnectNetwork(networkRef, containerRef string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n, err := s.findNetworkLocked(networkRef)
+	if err != nil {
+		return err
+	}
+	c, err := s.findContainerLocked(containerRef)
+	if err != nil {
+		return err
+	}
+	key, ok := attachment(*c, *n)
+	if !ok {
+		return cerrdefs.ErrInternal.WithMessage(fmt.Sprintf(
+			"container %s is not connected to network %s", c.ID, n.Name))
+	}
+	delete(c.NetworkSettings.Networks, key)
+	s.emitLocked(networkEvent(events.ActionDisconnect, *n, c))
+	return nil
 }
 
 // SetPullScript scripts the pull of ref. ref is normalized, so "redis" and
@@ -1109,6 +1309,95 @@ func (s *Service) VolumeRemove(ctx context.Context, name string, opts docker.Vol
 }
 
 // ---------------------------------------------------------------------------
+// docker.Service: networks
+
+// NetworkList implements docker.Service.
+func (s *Service) NetworkList(ctx context.Context) ([]network.Summary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.beginLocked(ctx, MethodNetworkList); err != nil {
+		return nil, err
+	}
+	out := make([]network.Summary, 0, len(s.networks))
+	for _, n := range s.networks {
+		out = append(out, network.Summary{Network: cloneNetwork(n)})
+	}
+	return out, nil
+}
+
+// NetworkInspect implements docker.Service. Like the engine, and more
+// leniently than the Service contract (an ID), the network is a full ID, a
+// name or a unique ID prefix that docker.ValidateNetworkID accepts, and
+// Containers lists only the
+// running (or paused) containers: stopped ones hold no endpoint.
+func (s *Service) NetworkInspect(ctx context.Context, id string) (docker.NetworkInspectResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.beginLocked(ctx, MethodNetworkInspect, id); err != nil {
+		return docker.NetworkInspectResult{}, err
+	}
+	if err := docker.ValidateNetworkID(id); err != nil {
+		return docker.NetworkInspectResult{}, err
+	}
+	n, err := s.findNetworkLocked(id)
+	if err != nil {
+		return docker.NetworkInspectResult{}, err
+	}
+	insp := network.Inspect{Network: cloneNetwork(*n), Containers: map[string]network.EndpointResource{}}
+	for _, c := range s.containers {
+		if !isActive(c.State) {
+			continue
+		}
+		if key, ok := attachment(c, *n); ok {
+			insp.Containers[c.ID] = network.EndpointResource{
+				Name:       primaryName(c),
+				EndpointID: c.NetworkSettings.Networks[key].EndpointID,
+			}
+		}
+	}
+	raw, err := json.Marshal(insp)
+	if err != nil {
+		return docker.NetworkInspectResult{}, err
+	}
+	return docker.NetworkInspectResult{Network: insp, Raw: raw}, nil
+}
+
+// NetworkRemove implements docker.Service. The network resolves as for
+// NetworkInspect. Like the engine, it refuses the
+// predefined networks and a network a running, paused or restarting
+// container is connected to, both with permission denied. Stopped
+// containers do not block removal; their endpoints are left as they are.
+func (s *Service) NetworkRemove(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.beginLocked(ctx, MethodNetworkRemove, id); err != nil {
+		return err
+	}
+	if err := docker.ValidateNetworkID(id); err != nil {
+		return err
+	}
+	n, err := s.findNetworkLocked(id)
+	if err != nil {
+		return err
+	}
+	if slices.Contains(PredefinedNetworks, n.Name) {
+		return cerrdefs.ErrPermissionDenied.WithMessage(fmt.Sprintf(
+			"%s is a pre-defined network and cannot be removed", n.Name))
+	}
+	for _, c := range s.containers {
+		if _, ok := attachment(c, *n); ok && isActive(c.State) {
+			return cerrdefs.ErrPermissionDenied.WithMessage(fmt.Sprintf(
+				"error while removing network: network %s has active endpoints (name:%q id:%q)",
+				n.Name, primaryName(c), shortID(c.ID)))
+		}
+	}
+	removed := *n
+	s.networks = slices.DeleteFunc(s.networks, func(x network.Network) bool { return x.ID == removed.ID })
+	s.emitLocked(networkEvent(events.ActionDestroy, removed, nil))
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // docker.Service: exec
 
 // ExecCreate implements docker.Service.
@@ -1403,6 +1692,102 @@ func (s *Service) volumeUsersLocked(name string) []string {
 }
 
 func (s *Service) volumeInUseLocked(name string) bool { return len(s.volumeUsersLocked(name)) > 0 }
+
+func (s *Service) networkIndexLocked(id string) int {
+	return slices.IndexFunc(s.networks, func(n network.Network) bool { return n.ID == id })
+}
+
+func (s *Service) networkByNameLocked(name string) int {
+	return slices.IndexFunc(s.networks, func(n network.Network) bool { return n.Name == name })
+}
+
+// findNetworkLocked resolves a full ID, a name, or a unique ID prefix, in
+// the engine's order.
+func (s *Service) findNetworkLocked(ref string) (*network.Network, error) {
+	if ref == "" {
+		return nil, cerrdefs.ErrInvalidArgument.WithMessage("network ID is empty")
+	}
+	if i := s.networkIndexLocked(ref); i >= 0 {
+		return &s.networks[i], nil
+	}
+	if i := s.networkByNameLocked(ref); i >= 0 {
+		return &s.networks[i], nil
+	}
+	match := -1
+	for i := range s.networks {
+		if strings.HasPrefix(s.networks[i].ID, ref) {
+			if match >= 0 {
+				return nil, cerrdefs.ErrInvalidArgument.WithMessage(fmt.Sprintf("network %s is ambiguous", ref))
+			}
+			match = i
+		}
+	}
+	if match < 0 {
+		return nil, noSuchNetwork(ref)
+	}
+	return &s.networks[match], nil
+}
+
+// attachment returns the key of c's endpoint on n. An endpoint with a
+// NetworkID belongs to the network with that ID only, so a network removed
+// and recreated under the same name does not inherit it; one without (a
+// container never started) belongs to the network of its key's name.
+func attachment(c container.Summary, n network.Network) (string, bool) {
+	if c.NetworkSettings == nil {
+		return "", false
+	}
+	for key, ep := range c.NetworkSettings.Networks {
+		if ep == nil {
+			continue
+		}
+		if ep.NetworkID == n.ID || (ep.NetworkID == "" && key == n.Name) {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func completeNetwork(n network.Network) network.Network {
+	if n.Driver == "" {
+		n.Driver = "bridge"
+	}
+	if n.Scope == "" {
+		n.Scope = "local"
+	}
+	if n.Created.IsZero() {
+		n.Created = time.Now().UTC()
+	}
+	if n.IPAM.Driver == "" {
+		n.IPAM.Driver = "default"
+	}
+	if n.Labels == nil {
+		n.Labels = map[string]string{}
+	}
+	if n.Options == nil {
+		n.Options = map[string]string{}
+	}
+	return cloneNetwork(n)
+}
+
+// predefinedNetworks returns the networks a fresh Linux engine has.
+func predefinedNetworks(created time.Time) []network.Network {
+	bridge := network.Network{
+		Name: BridgeNetwork, ID: PredefinedNetworkID(BridgeNetwork), Driver: "bridge", EnableIPv4: true,
+		IPAM: network.IPAM{Config: []network.IPAMConfig{{
+			Subnet:  netip.MustParsePrefix("172.17.0.0/16"),
+			Gateway: netip.MustParseAddr("172.17.0.1"),
+		}}},
+		Options: map[string]string{"com.docker.network.bridge.default_bridge": "true"},
+	}
+	host := network.Network{Name: HostNetwork, ID: PredefinedNetworkID(HostNetwork), Driver: "host"}
+	none := network.Network{Name: NoneNetwork, ID: PredefinedNetworkID(NoneNetwork), Driver: "null"}
+	out := []network.Network{bridge, host, none}
+	for i := range out {
+		out[i].Created = created
+		out[i] = completeNetwork(out[i])
+	}
+	return out
+}
 
 func (s *Service) completeVolume(v volume.Volume) volume.Volume {
 	if v.Driver == "" {
@@ -1960,6 +2345,10 @@ func noSuchImage(ref string) error {
 	return cerrdefs.ErrNotFound.WithMessage(fmt.Sprintf("No such image: %s", ref))
 }
 
+func noSuchNetwork(ref string) error {
+	return cerrdefs.ErrNotFound.WithMessage(fmt.Sprintf("network %s not found", ref))
+}
+
 func noSuchVolume(name string) error {
 	return cerrdefs.ErrNotFound.WithMessage(fmt.Sprintf("get %s: no such volume", name))
 }
@@ -1996,6 +2385,20 @@ func volumeEvent(action events.Action, name string) events.Message {
 	}
 }
 
+// networkEvent is the engine's event for a network action. Connect and
+// disconnect events name the container in their "container" attribute.
+func networkEvent(action events.Action, n network.Network, c *container.Summary) events.Message {
+	attrs := map[string]string{"name": n.Name, "type": n.Driver}
+	if c != nil {
+		attrs["container"] = c.ID
+	}
+	return events.Message{
+		Type:   events.NetworkEventType,
+		Action: action,
+		Actor:  events.Actor{ID: n.ID, Attributes: attrs},
+	}
+}
+
 func cloneContainer(c container.Summary) container.Summary {
 	c.Names = slices.Clone(c.Names)
 	c.Ports = slices.Clone(c.Ports)
@@ -2007,7 +2410,13 @@ func cloneContainer(c container.Summary) container.Summary {
 	}
 	if c.NetworkSettings != nil {
 		ns := *c.NetworkSettings
-		ns.Networks = maps.Clone(ns.Networks)
+		if ns.Networks != nil {
+			nets := make(map[string]*network.EndpointSettings, len(ns.Networks))
+			for name, ep := range ns.Networks {
+				nets[name] = ep.Copy()
+			}
+			ns.Networks = nets
+		}
 		c.NetworkSettings = &ns
 	}
 	c.HostConfig.Annotations = maps.Clone(c.HostConfig.Annotations)
@@ -2035,6 +2444,18 @@ func cloneStats(s container.StatsResponse) container.StatsResponse {
 		*p = slices.Clone(*p)
 	}
 	return s
+}
+
+func cloneNetwork(n network.Network) network.Network {
+	n.Labels = maps.Clone(n.Labels)
+	n.Options = maps.Clone(n.Options)
+	n.IPAM.Options = maps.Clone(n.IPAM.Options)
+	n.IPAM.Config = slices.Clone(n.IPAM.Config)
+	for i := range n.IPAM.Config {
+		n.IPAM.Config[i].AuxAddress = maps.Clone(n.IPAM.Config[i].AuxAddress)
+	}
+	n.Peers = slices.Clone(n.Peers)
+	return n
 }
 
 func cloneVolume(v volume.Volume) volume.Volume {
