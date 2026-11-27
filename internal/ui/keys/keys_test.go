@@ -39,6 +39,7 @@ func TestSwitchKeysReserved(t *testing.T) {
 		"images":     Images.Bindings(),
 		"volumes":    Volumes.Bindings(),
 		"projects":   Projects.Bindings(),
+		"networks":   Networks.Bindings(),
 		"logs":       {Logs.Follow, Logs.Search, Logs.Reopen},
 		"global":     {Global.Command, Global.Help, Global.Back, Global.Quit, Global.ForceQuit},
 	}
@@ -147,5 +148,36 @@ func TestFiveTabKeys(t *testing.T) {
 	}
 	if got := Global.SwitchHelp.Help().Key; got != "1-5/tab" {
 		t.Errorf("SwitchHelp help key %q, want %q", got, "1-5/tab")
+	}
+}
+
+// TestNetworksKeysDistinct fails if two bindings the networks view answers
+// to share a key, and checks that its actions use the keys the other list
+// views use for the same actions.
+func TestNetworksKeysDistinct(t *testing.T) {
+	bs := slices.Concat(Networks.Bindings(), Table.Bindings(),
+		[]key.Binding{Global.Command, Global.Help, Global.Back, Global.Quit, Global.ForceQuit},
+		Global.TabKeys(), []key.Binding{Global.NextTab, Global.PrevTab})
+	owner := map[string]string{}
+	for _, b := range bs {
+		for _, k := range b.Keys() {
+			if prev, ok := owner[k]; ok {
+				t.Errorf("key %q is bound by both %q and %q", k, prev, b.Help().Desc)
+				continue
+			}
+			owner[k] = b.Help().Desc
+		}
+	}
+	for name, want := range map[string]struct {
+		b, like key.Binding
+	}{
+		"Containers": {Networks.Containers, Volumes.Containers},
+		"Inspect":    {Networks.Inspect, Volumes.Inspect},
+		"Delete":     {Networks.Delete, Volumes.Delete},
+		"Prune":      {Networks.Prune, Volumes.Prune},
+	} {
+		if !slices.Equal(want.b.Keys(), want.like.Keys()) {
+			t.Errorf("Networks.%s keys %q, want %q as in the volumes view", name, want.b.Keys(), want.like.Keys())
+		}
 	}
 }

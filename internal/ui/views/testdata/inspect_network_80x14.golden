@@ -1,0 +1,14 @@
+ drydock > networks > myapp_default > inspect                       ● connected 
+  1 co (3)   2 im (0)   3 vol (0)   4 pr (0)   5 net (8)                        
+────────────────────────────────────────────────────────────────────────────────
+{                                                                               
+  "Name": "myapp_default",                                                      
+  "Id": "0000000000000000000000000000000000000000000000000000000000000001",     
+  "Created": "2026-11-20T10:00:00Z",                                            
+  "Scope": "local",                                                             
+  "Driver": "bridge",                                                           
+  "EnableIPv4": false,                                                          
+  "EnableIPv6": false,                                                          
+  "IPAM": {                                                                     
+                                                                                
+ ↑/k up  ↓/j down  g top  G bottom  pgup page up  pgdn page down  ? more        

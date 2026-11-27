@@ -32,7 +32,7 @@ func TestResourcesOrder(t *testing.T) {
 	for _, r := range Resources(nil) {
 		got = append(got, r.Name+"/"+strings.Join(r.Aliases, ","))
 	}
-	want := []string{"containers/co", "images/im", "volumes/vol", "projects/pr"}
+	want := []string{"containers/co", "images/im", "volumes/vol", "projects/pr", "networks/net"}
 	if !slices.Equal(got, want) {
 		t.Errorf("resources %q, want %q", got, want)
 	}
@@ -50,11 +50,12 @@ func TestResourcesShareSessionPrefsStartingOff(t *testing.T) {
 	iv := rs[1].New(store.Snapshot{}).(*imagesView)
 	vv := rs[2].New(store.Snapshot{}).(*volumesView)
 	pv := rs[3].New(store.Snapshot{}).(*projectsView)
-	t.Cleanup(func() { cv.Close(); iv.Close(); vv.Close(); pv.Close() })
+	nv := rs[4].New(store.Snapshot{}).(*networksView)
+	t.Cleanup(func() { cv.Close(); iv.Close(); vv.Close(); pv.Close(); nv.Close() })
 	if cv.prefs.Stats || cv.statsCols {
 		t.Error("a fresh containers view has stats on")
 	}
-	if cv.prefs != iv.prefs || cv.prefs != vv.prefs || cv.prefs != pv.prefs {
+	if cv.prefs != iv.prefs || cv.prefs != vv.prefs || cv.prefs != pv.prefs || cv.prefs != nv.prefs {
 		t.Error("the resource views do not share one Prefs")
 	}
 	if again := Resources(st)[0].New(store.Snapshot{}).(*containersView); again.prefs == cv.prefs {

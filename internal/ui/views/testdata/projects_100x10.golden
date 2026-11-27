@@ -1,5 +1,5 @@
  drydock > projects                                                                     ● connected 
-  1 containers (8)   2 images (0)   3 volumes (0)   4 projects (4)                              1/4 
+  1 containers (8)   2 images (0)   3 volumes (0)   4 projects (4)   5 networks (3)             1/4 
   PROJECT               RUNNING  STATE      WORKING DIR                                             
 ▌ blog                  0/1      ○ exited   /srv/blog                                               
   myapp                 2/3      ◐ partial  ~/src/myapp                                             

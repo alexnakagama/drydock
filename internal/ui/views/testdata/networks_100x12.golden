@@ -1,0 +1,12 @@
+ drydock > networks                                                                     ● connected 
+  1 containers (3)   2 images (0)   3 volumes (0)   4 projects (0)   5 networks (8)             1/8 
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  NAME                            DRIVER      SCOPE   SUBNET                                  IN USE
+▌ batch_net                       bridge      local   172.22.0.0/16                           1     
+  bridge                          bridge      local   172.17.0.0/16                           0     
+  dual                            bridge      local   172.21.0.0/16 +1                        1     
+  host                            host        local   -                                       0     
+  myapp_default                   bridge      local   172.20.0.0/16                           2     
+  none                            null        local   -                                       0     
+                                                                                                    
+ enter containers  i inspect  d delete  / filter  P prune unused  : command  ? help  q quit         
