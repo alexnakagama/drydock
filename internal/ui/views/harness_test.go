@@ -48,6 +48,7 @@ type env struct {
 	containers []*containersView
 	images     []*imagesView
 	volumes    []*volumesView
+	projects   []*projectsView
 	logs       []*logsView
 	// pushed are the containers views a test pushed itself, for helpers
 	// that act on the top containers view.
@@ -58,9 +59,10 @@ type env struct {
 
 	// execEnv and logsCfg configure the views the model creates, and prefs
 	// are the session settings they share.
-	execEnv execEnv
-	logsCfg logsConfig
-	prefs   *Prefs
+	execEnv     execEnv
+	logsCfg     logsConfig
+	projectsCfg projectsConfig
+	prefs       *Prefs
 	// execResult is returned by the fake terminal handover.
 	execResult error
 }
@@ -76,7 +78,7 @@ func newEnv(t *testing.T, f *dockerfake.Service, width, height int) *env {
 func newEnvOn(t *testing.T, svc docker.Service, f *dockerfake.Service, width, height int) *env {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	e := &env{t: t, f: f, in: make(chan tea.Msg, 256), ctx: ctx, prefs: &Prefs{}}
+	e := &env{t: t, f: f, in: make(chan tea.Msg, 256), ctx: ctx, prefs: &Prefs{}, projectsCfg: projectsConfig{home: testHome}}
 	e.logsCfg = defaultLogsConfig()
 	e.execEnv = execEnv{
 		lookPath: func(string) (string, error) { return "/usr/bin/docker", nil },
@@ -119,6 +121,11 @@ func newEnvOn(t *testing.T, svc docker.Service, f *dockerfake.Service, width, he
 			e.volumes = append(e.volumes, v)
 			return v
 		}, Count: store.Snapshot.NumVolumes},
+		{Name: "projects", Aliases: []string{"pr"}, New: func(snap store.Snapshot) ui.View {
+			v := newProjectsView(e.st, snap, e.prefs, e.projectsCfg)
+			e.projects = append(e.projects, v)
+			return v
+		}, Count: store.Snapshot.NumProjects},
 	}, "containers")
 	e.m.SetTimerFunc(func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil })
 
@@ -343,6 +350,9 @@ func (e *env) selectRow(name string) {
 	}
 	e.t.Fatalf("no row %s; screen:\n%s", name, e.screen())
 }
+
+// testHome is the home directory the projects view shortens to ~ in tests.
+const testHome = "/home/me"
 
 // testNow is the reference time of views that display ages.
 var testNow = time.Date(2026, time.November, 24, 12, 0, 0, 0, time.UTC)

@@ -1,6 +1,8 @@
 package views
 
 import (
+	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -23,6 +25,19 @@ func TestResourcesFitTabKeys(t *testing.T) {
 	}
 }
 
+// The resources are listed in tab order, with the names and aliases the
+// command bar accepts.
+func TestResourcesOrder(t *testing.T) {
+	var got []string
+	for _, r := range Resources(nil) {
+		got = append(got, r.Name+"/"+strings.Join(r.Aliases, ","))
+	}
+	want := []string{"containers/co", "images/im", "volumes/vol", "projects/pr"}
+	if !slices.Equal(got, want) {
+		t.Errorf("resources %q, want %q", got, want)
+	}
+}
+
 // A fresh Resources, as after a restart, starts with stats off, and its
 // views share one Prefs, so the setting is session-wide.
 func TestResourcesShareSessionPrefsStartingOff(t *testing.T) {
@@ -34,11 +49,12 @@ func TestResourcesShareSessionPrefsStartingOff(t *testing.T) {
 	cv := rs[0].New(store.Snapshot{}).(*containersView)
 	iv := rs[1].New(store.Snapshot{}).(*imagesView)
 	vv := rs[2].New(store.Snapshot{}).(*volumesView)
-	t.Cleanup(func() { cv.Close(); iv.Close(); vv.Close() })
+	pv := rs[3].New(store.Snapshot{}).(*projectsView)
+	t.Cleanup(func() { cv.Close(); iv.Close(); vv.Close(); pv.Close() })
 	if cv.prefs.Stats || cv.statsCols {
 		t.Error("a fresh containers view has stats on")
 	}
-	if cv.prefs != iv.prefs || cv.prefs != vv.prefs {
+	if cv.prefs != iv.prefs || cv.prefs != vv.prefs || cv.prefs != pv.prefs {
 		t.Error("the resource views do not share one Prefs")
 	}
 	if again := Resources(st)[0].New(store.Snapshot{}).(*containersView); again.prefs == cv.prefs {

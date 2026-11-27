@@ -38,6 +38,7 @@ func TestSwitchKeysReserved(t *testing.T) {
 		"containers": Containers.Bindings(),
 		"images":     Images.Bindings(),
 		"volumes":    Volumes.Bindings(),
+		"projects":   Projects.Bindings(),
 		"logs":       {Logs.Follow, Logs.Search, Logs.Reopen},
 		"global":     {Global.Command, Global.Help, Global.Back, Global.Quit, Global.ForceQuit},
 	}
@@ -95,5 +96,26 @@ func TestContainersBindingsListPauseAndPrune(t *testing.T) {
 		if !slices.Contains(listed, k) {
 			t.Errorf("containers Bindings() does not list %q", k)
 		}
+	}
+}
+
+// TestFourTabKeys fails if a number key is missing for one of the four
+// resources, or if a tab key is not reserved from the views.
+func TestFourTabKeys(t *testing.T) {
+	tabs := Global.TabKeys()
+	want := []string{"1", "2", "3", "4"}
+	if len(tabs) != len(want) {
+		t.Fatalf("TabKeys() has %d bindings, want %d", len(tabs), len(want))
+	}
+	for i, b := range tabs {
+		if !slices.Equal(b.Keys(), []string{want[i]}) {
+			t.Errorf("TabKeys()[%d] keys %q, want %q", i, b.Keys(), want[i])
+		}
+		if !slices.Contains(switchKeys, want[i]) {
+			t.Errorf("tab key %q is not reserved in switchKeys", want[i])
+		}
+	}
+	if got := Global.SwitchHelp.Help().Key; got != "1-4/tab" {
+		t.Errorf("SwitchHelp help key %q, want %q", got, "1-4/tab")
 	}
 }

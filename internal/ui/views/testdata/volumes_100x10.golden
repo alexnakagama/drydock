@@ -1,5 +1,5 @@
  drydock > volumes                                                                      ● connected 
-  1 containers (2)   2 images (0)   3 volumes (5)                                               1/5 
+  1 containers (2)   2 images (0)   3 volumes (5)   4 projects (0)                              1/5 
   NAME                               DRIVER      MOUNTPOINT                                   IN USE
 ▌ 77777777777777777777777777777777…  local       /var/lib/docker/volumes/777777777777777777…  0     
   cache-data                         local       /var/lib/docker/volumes/cache-data/_data     0     

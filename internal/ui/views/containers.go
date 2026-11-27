@@ -574,7 +574,13 @@ func containerTone(s container.ContainerState) components.Tone {
 // cell text, so the state stays readable on the selected row (which is not
 // colored) and without color.
 func containerGlyph(s container.ContainerState) string {
-	switch containerTone(s) {
+	return toneGlyph(containerTone(s))
+}
+
+// toneGlyph returns the glyph that begins a state cell for a row of the
+// given tone: ● for good, ◐ for warn, ○ for dim and a blank otherwise.
+func toneGlyph(t components.Tone) string {
+	switch t {
 	case components.ToneGood:
 		return "●"
 	case components.ToneWarn:

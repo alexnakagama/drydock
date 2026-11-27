@@ -1,5 +1,5 @@
  drydock > containers [all]                                                             ● connected 
-  1 containers (4)   2 images (0)   3 volumes (0)                                               1/4 
+  1 containers (4)   2 images (0)   3 volumes (0)   4 projects (0)                              1/4 
   NAME                  IMAGE                     STATUS                    PORTS                   
 ▌ db                    postgres:16               ● Up 2 hours              5432/tcp                
   frozen                redis:7                   ◐ Up 1 hour (Paused)                              
