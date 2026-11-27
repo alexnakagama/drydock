@@ -64,8 +64,8 @@
 
 ## 6. Integration
 
-- [ ] 6.1 Add an integration test (`-tags integration`) in `internal/docker/sdk_integration_test.go`. It creates a temporary `DOCKER_CONFIG` and runs `docker context create drydock-it --docker host=<the CI engine's socket>` against it, then sets `currentContext` to `drydock-it`. It checks that `Resolve` plus `NewSDKService` pings the engine, and that the store layout `docker` wrote matches what `dockerctx` reads. Verify that `go test -count=1 -tags integration ./internal/docker/...` passes locally and in CI.
-- [ ] 6.2 Run the full suite: `gofmt -l .`, `go vet ./...`, `go vet -tags integration ./...`, `golangci-lint run ./...`, `golangci-lint run --build-tags integration ./...` and `go test -race ./...`. Verify that all pass with no new lint exclusions.
+- [x] 6.1 Add an integration test (`-tags integration`) in `internal/docker/sdk_integration_test.go`. It creates a temporary `DOCKER_CONFIG` and runs `docker context create drydock-it --docker host=<the CI engine's socket>` against it, then sets `currentContext` to `drydock-it`. It checks that `Resolve` plus `NewSDKService` pings the engine, and that the store layout `docker` wrote matches what `dockerctx` reads. Verify that `go test -count=1 -tags integration ./internal/docker/...` passes locally and in CI.
+- [x] 6.2 Run the full suite: `gofmt -l .`, `go vet ./...`, `go vet -tags integration ./...`, `golangci-lint run ./...`, `golangci-lint run --build-tags integration ./...` and `go test -race ./...`. Verify that all pass with no new lint exclusions.
 
 ## Workflow follow-up
 
