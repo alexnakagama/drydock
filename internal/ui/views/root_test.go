@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/api/types/volume"
 
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
@@ -100,6 +101,35 @@ func TestProjectsResourceOpens(t *testing.T) {
 			t.Errorf("projects tab not highlighted with its count:\n%s", e.tabsLine())
 		}
 	}
+}
+
+func TestNetworksResourceOpens(t *testing.T) {
+	for _, open := range []func(e *env){
+		func(e *env) { e.command("networks") },
+		func(e *env) { e.command("net") },
+		func(e *env) { e.press("5"); e.settle() },
+	} {
+		e := newEnv(t, networkSample(t), 100, 12)
+		open(e)
+		if h := e.header(); !strings.HasPrefix(h, "drydock > networks") {
+			t.Fatalf("header %q, want drydock > networks", h)
+		}
+		if raw := e.m.View().Content; !strings.Contains(raw, components.Styles.TabPillActive.Render("5 networks (8)")) {
+			t.Errorf("networks tab not highlighted with its count:\n%s", e.tabsLine())
+		}
+	}
+}
+
+func TestTabsNetworksCountUpdatesLive(t *testing.T) {
+	f := dockerfake.New()
+	e := newEnv(t, f, 100, 12)
+	if tabs := e.tabsLine(); !strings.Contains(tabs, "5 networks (3)") {
+		t.Fatalf("tabs %q, want the 3 built-in networks", tabs)
+	}
+	if _, err := f.AddNetwork(network.Network{Name: "test-net"}); err != nil {
+		t.Fatal(err)
+	}
+	e.until("networks count", func() bool { return strings.Contains(e.tabsLine(), "5 networks (4)") })
 }
 
 func TestTabsProjectsCount(t *testing.T) {
@@ -213,6 +243,7 @@ func TestBackgroundColorRestylesViewInputs(t *testing.T) {
 		"containers": func(*env) {},
 		"images":     func(e *env) { e.command("images") },
 		"volumes":    func(e *env) { e.command("volumes") },
+		"networks":   func(e *env) { e.command("networks") },
 		"logs":       func(e *env) { e.openLogs() },
 	}
 	for name, open := range setup {

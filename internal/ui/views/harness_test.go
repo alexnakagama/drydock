@@ -49,6 +49,7 @@ type env struct {
 	images     []*imagesView
 	volumes    []*volumesView
 	projects   []*projectsView
+	networks   []*networksView
 	logs       []*logsView
 	// pushed are the containers views a test pushed itself, for helpers
 	// that act on the top containers view.
@@ -126,6 +127,11 @@ func newEnvOn(t *testing.T, svc docker.Service, f *dockerfake.Service, width, he
 			e.projects = append(e.projects, v)
 			return v
 		}, Count: store.Snapshot.NumProjects},
+		{Name: "networks", Aliases: []string{"net"}, New: func(snap store.Snapshot) ui.View {
+			v := newNetworksView(e.st, snap, e.prefs)
+			e.networks = append(e.networks, v)
+			return v
+		}, Count: store.Snapshot.NumNetworks},
 	}, "containers")
 	e.m.SetTimerFunc(func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil })
 

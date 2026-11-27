@@ -1,5 +1,5 @@
  drydock > images [tagged]                                                              ● connected 
-  1 containers (3)   2 images (6)   3 volumes (0)   4 projects (0)                              1/5 
+  1 containers (3)   2 images (6)   3 volumes (0)   4 projects (0)   5 networks (3)             1/5 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   REPOSITORY:TAG                                   ID            SIZE       CREATED           IN USE
 ▌ alpine:3.20                                      cccccccccccc  7.8MB      2 months ago      0     

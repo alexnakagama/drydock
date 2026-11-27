@@ -253,6 +253,31 @@ func (m VolumesMap) Bindings() []key.Binding {
 	return []key.Binding{m.Containers, m.Create, m.Delete, m.Inspect, m.Prune}
 }
 
+// NetworksMap holds the networks view's action keys.
+type NetworksMap struct {
+	// Containers opens the containers attached to the selected network.
+	Containers key.Binding
+	Inspect    key.Binding
+	// Delete removes the selected network. Built-in networks cannot be
+	// removed, and the view hides its hint on them.
+	Delete key.Binding
+	// Prune removes the networks no container, running or stopped, uses.
+	Prune key.Binding
+}
+
+// Networks is the networks-view keymap.
+var Networks = NetworksMap{
+	Containers: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "containers")),
+	Inspect:    key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "inspect")),
+	Delete:     key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete")),
+	Prune:      key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "prune unused")),
+}
+
+// Bindings returns the networks-view bindings in display order.
+func (m NetworksMap) Bindings() []key.Binding {
+	return []key.Binding{m.Containers, m.Inspect, m.Delete, m.Prune}
+}
+
 // ProjectsMap holds the projects view's action keys.
 type ProjectsMap struct {
 	// Containers opens the containers of the selected project.

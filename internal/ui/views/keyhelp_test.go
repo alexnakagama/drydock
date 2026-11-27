@@ -275,6 +275,54 @@ func TestVolumesKeyHelp(t *testing.T) {
 	})
 }
 
+func TestNetworksKeyHelp(t *testing.T) {
+	e := networksEnv(t, networkSample(t), 100, 16)
+	v := e.networksView()
+
+	e.selectNetwork("myapp_default")
+	checkHelp(t, "used network", v.KeyHelp(), []string{
+		"enter containers", "i inspect", "d delete", "/ filter", "P prune unused",
+	})
+	e.selectNetwork("old-net")
+	checkHelp(t, "unused network", v.KeyHelp(), []string{
+		"-enter containers", "i inspect", "d delete", "/ filter", "P prune unused",
+	})
+	e.selectNetwork("bridge")
+	checkHelp(t, "unused built-in network", v.KeyHelp(), []string{
+		"-enter containers", "i inspect", "-d delete", "/ filter", "P prune unused",
+	})
+
+	e.press("/")
+	e.typeText("zzz")
+	e.press("enter")
+	checkHelp(t, "no row listed", v.KeyHelp(), []string{
+		"-enter containers", "-i inspect", "-d delete", "/ filter", "P prune unused",
+	})
+}
+
+func TestNetworksFooterAndHelp(t *testing.T) {
+	e := networksEnv(t, networkSample(t), 200, 30)
+	e.selectNetwork("myapp_default")
+	got := e.footer()
+	for _, want := range []string{"enter containers", "i inspect", "d delete", "/ filter", "P prune unused"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("footer %q lacks %q", got, want)
+		}
+	}
+	e.selectNetwork("bridge")
+	if got := e.footer(); strings.Contains(got, "d delete") || !strings.Contains(got, "i inspect") {
+		t.Errorf("built-in network: footer %q, want i inspect and no d delete", got)
+	}
+	// The help overlay still lists the hidden key, dimmed.
+	e.press("?")
+	s := e.screen()
+	for _, want := range []string{"Networks", "d          delete", "P          prune unused", "i          inspect", "enter      containers"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("help lacks %q:\n%s", want, s)
+		}
+	}
+}
+
 // Hiding a hint never disables its key: the views match key presses against
 // the package-level keymaps, which KeyHelp must leave untouched.
 
@@ -313,6 +361,7 @@ func TestKeyHelpLeavesKeymapsUntouched(t *testing.T) {
 	wantImages := helpEntries(keys.Images.Bindings())
 	wantVolumes := helpEntries(keys.Volumes.Bindings())
 	wantProjects := helpEntries(keys.Projects.Bindings())
+	wantNetworks := helpEntries(keys.Networks.Bindings())
 
 	// Exercise every disabling and relabelling path.
 	f, _ := sample()
@@ -335,6 +384,11 @@ func TestKeyHelpLeavesKeymapsUntouched(t *testing.T) {
 		pe.projectsView().KeyHelp()
 	}
 	projectsEnv(t, dockerfake.New(), 100, 8).projectsView().KeyHelp()
+	ne := networksEnv(t, networkSample(t), 100, 12)
+	for _, name := range []string{"myapp_default", "old-net", "bridge"} {
+		ne.selectNetwork(name)
+		ne.networksView().KeyHelp()
+	}
 
 	for _, c := range []struct {
 		name      string
@@ -344,6 +398,7 @@ func TestKeyHelpLeavesKeymapsUntouched(t *testing.T) {
 		{"keys.Images", helpEntries(keys.Images.Bindings()), wantImages},
 		{"keys.Volumes", helpEntries(keys.Volumes.Bindings()), wantVolumes},
 		{"keys.Projects", helpEntries(keys.Projects.Bindings()), wantProjects},
+		{"keys.Networks", helpEntries(keys.Networks.Bindings()), wantNetworks},
 		{"keys.Table.Filter", helpEntries([]key.Binding{keys.Table.Filter}), []string{"/ filter"}},
 	} {
 		if !slices.Equal(c.got, c.want) {
@@ -371,6 +426,8 @@ func TestKeyHelpLeavesKeymapsUntouched(t *testing.T) {
 		{keys.Containers.Logs, []string{"l"}},
 		{keys.Images.Containers, []string{"enter"}},
 		{keys.Volumes.Containers, []string{"enter"}},
+		{keys.Networks.Containers, []string{"enter"}},
+		{keys.Networks.Delete, []string{"d"}},
 		{keys.Projects.StartStop, []string{"s"}},
 		{keys.Projects.Restart, []string{"r"}},
 	} {
