@@ -28,9 +28,9 @@
 
 ## 5. Compose column in containers views
 
-- [ ] 5.1 Add the column mode to containers views (`project` for the root and the image/volume drill-downs, `service` for the project drill-down, via an option on `NewFilteredContainers`) and the two extra column sets with the minimum widths from design.md; verify a unit test that each of the four column sets fits exactly 100 cells with the gutter and gaps
-- [ ] 5.2 Switch column sets per snapshot on `NumProjects() > 0`, keeping selection, filter and the stats layout, show `-` for unlabeled containers, and make the column a filter column; verify with tests for: no Compose containers (the containers table's columns and rows unchanged in the existing golden files), column shown while the only Compose container is hidden by `a`, column appearing on a new snapshot, SERVICE in a project drill-down, filtering by project, and new golden files for the ports and stats layouts at 100 columns
-- [ ] 5.3 Update the README (tab strip and counts, `1`-`4` and `:projects`/`pr` keys, the projects view keys table row, the PROJECT/SERVICE column, and that start only starts existing containers) and verify the keys table matches the help overlay
+- [x] 5.1 Add the column mode to containers views (`project` for the root and the image/volume drill-downs, `service` for the project drill-down, via an option on `NewFilteredContainers`) and the two extra column sets with the minimum widths from design.md; verify a unit test that each of the four column sets fits exactly 100 cells with the gutter and gaps
+- [x] 5.2 Switch column sets per snapshot on `NumProjects() > 0`, keeping selection, filter and the stats layout, show `-` for unlabeled containers, and make the column a filter column; verify with tests for: no Compose containers (the containers table's columns and rows unchanged in the existing golden files), column shown while the only Compose container is hidden by `a`, column appearing on a new snapshot, SERVICE in a project drill-down, filtering by project, and new golden files for the ports and stats layouts at 100 columns
+- [x] 5.3 Update the README (tab strip and counts, `1`-`4` and `:projects`/`pr` keys, the projects view keys table row, the PROJECT/SERVICE column, and that start only starts existing containers) and verify the keys table matches the help overlay
 
 ## 6. Integration checks
 

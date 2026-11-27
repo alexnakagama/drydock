@@ -279,11 +279,13 @@ func projectTone(s store.ProjectState) components.Tone {
 }
 
 // showContainers pushes a containers view listing every container of the
-// named project, running or stopped, one-off containers included. Its
-// scoped prune (P) is limited to the project's stopped containers.
+// named project, running or stopped, one-off containers included, with the
+// SERVICE column in place of PROJECT. Its scoped prune (P) is limited to
+// the project's stopped containers.
 func (v *projectsView) showContainers(name string) tea.Cmd {
 	return ui.Push(NewFilteredContainers(v.st, v.snap, v.prefs, []string{name, "containers"},
-		"No containers in project "+name+".", func(c container.Summary) bool { return inProject(c, name) }))
+		"No containers in project "+name+".", func(c container.Summary) bool { return inProject(c, name) },
+		WithServiceColumn()))
 }
 
 // inProject reports whether c belongs to the named project, following the

@@ -34,8 +34,9 @@ var viewIDs atomic.Uint64
 
 func nextViewID() uint64 { return viewIDs.Add(1) }
 
-// containerColumns are the containers view's columns. NAME and IMAGE are
-// searched by the filter.
+// containerColumns are the containers view's columns while no container in
+// the engine belongs to a Compose project. NAME and IMAGE are searched by the
+// filter.
 var containerColumns = []components.Column{
 	{Title: "NAME", Width: 20, Flex: true, Filter: true},
 	{Title: "IMAGE", Width: 24, Flex: true, Filter: true},
@@ -53,6 +54,108 @@ var statsColumns = []components.Column{
 	{Title: "STATUS", Width: 24},
 	{Title: "CPU", Width: 7},
 	{Title: "MEM", Width: 19, Flex: true},
+}
+
+// composeColumnWidth is the minimum width of the Compose column (PROJECT or
+// SERVICE).
+const composeColumnWidth = 12
+
+// composeContainerColumns and composeStatsColumns are containerColumns and
+// statsColumns with the Compose column after NAME, shown while any
+// container in the engine belongs to a Compose project. The other minimum
+// widths are narrowed so that both still take 98 cells with the gaps. The
+// Compose column's title is set by composeColumns.
+var (
+	composeContainerColumns = []components.Column{
+		{Title: "NAME", Width: 18, Flex: true, Filter: true},
+		{Width: composeColumnWidth, Flex: true, Filter: true},
+		{Title: "IMAGE", Width: 18, Flex: true, Filter: true},
+		{Title: "STATUS", Width: 24},
+		{Title: "PORTS", Width: 18, Flex: true},
+	}
+	composeStatsColumns = []components.Column{
+		{Title: "NAME", Width: 18, Flex: true, Filter: true},
+		{Width: composeColumnWidth, Flex: true, Filter: true},
+		{Title: "IMAGE", Width: 12, Flex: true, Filter: true},
+		{Title: "STATUS", Width: 24},
+		{Title: "CPU", Width: 7},
+		{Title: "MEM", Width: 15, Flex: true},
+	}
+)
+
+// composeMode says which Compose label a containers view shows in its
+// Compose column.
+type composeMode uint8
+
+const (
+	// composeProject shows the project label, in the PROJECT column: the
+	// root containers view and the image and volume drill-downs.
+	composeProject composeMode = iota
+	// composeService shows the service label, in the SERVICE column: a
+	// project's drill-down, whose containers all share one project.
+	composeService
+)
+
+// title returns the Compose column's header.
+func (m composeMode) title() string {
+	if m == composeService {
+		return "SERVICE"
+	}
+	return "PROJECT"
+}
+
+// label returns the label the Compose column shows.
+func (m composeMode) label() string {
+	if m == composeService {
+		return store.ComposeServiceLabel
+	}
+	return store.ComposeProjectLabel
+}
+
+// cell returns c's Compose column cell: the mode's label, or noCompose when
+// c has none.
+func (m composeMode) cell(c container.Summary) string {
+	if v := c.Labels[m.label()]; v != "" {
+		return v
+	}
+	return noCompose
+}
+
+// noCompose is the Compose column's cell for a container without the label.
+const noCompose = "-"
+
+// columnsFor returns the column set for a layout: stats or ports, with or
+// without the Compose column titled for mode. It returns a new slice when
+// compose is set, so the package-level sets are never modified.
+func columnsFor(stats, compose bool, mode composeMode) []components.Column {
+	switch {
+	case !compose && !stats:
+		return containerColumns
+	case !compose:
+		return statsColumns
+	}
+	cols := composeContainerColumns
+	if stats {
+		cols = composeStatsColumns
+	}
+	cols = slices.Clone(cols)
+	cols[1].Title = mode.title()
+	return cols
+}
+
+// ContainersOption configures a drill-down containers view (see
+// NewFilteredContainers).
+type ContainersOption func(*containersOptions)
+
+type containersOptions struct {
+	compose composeMode
+}
+
+// WithServiceColumn makes the view's Compose column show each container's
+// Compose service, under SERVICE, instead of its project. It is for a
+// drill-down listing the containers of one project.
+func WithServiceColumn() ContainersOption {
+	return func(o *containersOptions) { o.compose = composeService }
 }
 
 // noStats is a stats cell's text when there is no value to show.
@@ -100,6 +203,11 @@ type containersView struct {
 	// which follows prefs.Stats whenever the view is on screen.
 	prefs     *Prefs
 	statsCols bool
+	// compose says what the Compose column shows, and composeCols whether
+	// the table has it: while the snapshot has any Compose project,
+	// whatever the listed rows.
+	compose     composeMode
+	composeCols bool
 	// active is set while the view is on screen (ui.Activatable), and
 	// closed once Close has been called.
 	active, closed bool
@@ -133,37 +241,44 @@ func NewContainers(st *store.Store, snap store.Snapshot, prefs *Prefs) ui.View {
 // prefs are as for NewContainers. crumbs are its breadcrumb segments (for
 // example {"nginx:1.27", "containers"}) and emptyText is shown when no
 // container matches. The view starts in "all" mode; `a` toggles it as usual.
+// Its Compose column shows the project unless opts say otherwise (see
+// WithServiceColumn).
 func NewFilteredContainers(st *store.Store, snap store.Snapshot, prefs *Prefs, crumbs []string, emptyText string,
-	match func(container.Summary) bool) ui.View {
+	match func(container.Summary) bool, opts ...ContainersOption) ui.View {
 	if match == nil {
 		panic("views: nil container predicate")
 	}
-	return newContainersView(st, snap, prefs, slices.Clone(crumbs), emptyText, match, true, defaultExecEnv())
+	return newContainersView(st, snap, prefs, slices.Clone(crumbs), emptyText, match, true, defaultExecEnv(), opts...)
 }
 
 func newContainersView(st *store.Store, snap store.Snapshot, prefs *Prefs, crumbs []string, emptyText string,
-	match func(container.Summary) bool, all bool, env execEnv) *containersView {
+	match func(container.Summary) bool, all bool, env execEnv, opts ...ContainersOption) *containersView {
 	if st == nil {
 		panic("views: nil store")
 	}
-	prefs = orNewPrefs(prefs)
-	cols := containerColumns
-	if prefs.Stats {
-		cols = statsColumns
+	var o containersOptions
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&o)
+		}
 	}
+	prefs = orNewPrefs(prefs)
+	composeCols := snap.NumProjects() > 0
 	v := &containersView{
-		id:        nextViewID(),
-		st:        st,
-		snap:      snap,
-		crumbs:    crumbs,
-		match:     match,
-		emptyText: emptyText,
-		all:       all,
-		table:     components.NewTable(cols),
-		prefs:     prefs,
-		statsCols: prefs.Stats,
-		conn:      st.State(),
-		exec:      env,
+		id:          nextViewID(),
+		st:          st,
+		snap:        snap,
+		crumbs:      crumbs,
+		match:       match,
+		emptyText:   emptyText,
+		all:         all,
+		table:       components.NewTable(columnsFor(prefs.Stats, composeCols, o.compose)),
+		prefs:       prefs,
+		statsCols:   prefs.Stats,
+		compose:     o.compose,
+		composeCols: composeCols,
+		conn:        st.State(),
+		exec:        env,
 	}
 	v.newLogs = func(id, name string) ui.View { return newLogsView(st, id, name, defaultLogsConfig()) }
 	v.refresh()
@@ -367,16 +482,20 @@ func (v *containersView) toggleStats() tea.Cmd {
 	return v.syncStats()
 }
 
-// applyLayout switches the table to the layout prefs.Stats selects,
-// keeping the filter and the selection.
+// applyLayout switches the table to the layout prefs.Stats and the
+// snapshot select, keeping the filter and the selection.
 func (v *containersView) applyLayout() {
-	v.statsCols = v.prefs.Stats
-	if v.statsCols {
-		v.table.SetColumns(statsColumns)
-	} else {
-		v.table.SetColumns(containerColumns)
-	}
+	v.setColumns()
 	v.setRows()
+}
+
+// setColumns gives the table the column set prefs.Stats and the snapshot
+// select: the Compose column is shown while the snapshot has any Compose
+// project. The caller must call setRows next.
+func (v *containersView) setColumns() {
+	v.statsCols = v.prefs.Stats
+	v.composeCols = v.snap.NumProjects() > 0
+	v.table.SetColumns(columnsFor(v.statsCols, v.composeCols, v.compose))
 }
 
 // syncStats holds a stats subscription exactly while the view is on screen
@@ -481,6 +600,13 @@ func (v *containersView) refresh() {
 		return cmp.Or(cmp.Compare(store.ContainerName(a), store.ContainerName(b)), cmp.Compare(a.ID, b.ID))
 	})
 
+	// The Compose column follows the whole snapshot, not the listed rows,
+	// so neither the `a` mode nor the filter makes the layout jump.
+	if want := v.snap.NumProjects() > 0; want != v.composeCols {
+		v.composeCols = want
+		v.table.SetColumns(columnsFor(v.statsCols, v.composeCols, v.compose))
+	}
+
 	v.list = list
 	v.shown = make(map[string]container.Summary, len(list))
 	for _, c := range list {
@@ -504,11 +630,15 @@ func (v *containersView) refresh() {
 func (v *containersView) setRows() {
 	rows := make([]components.Row, len(v.list))
 	for i, c := range v.list {
-		cells := []string{
-			store.ContainerName(c),
-			displayImage(c.Image),
-			containerGlyph(c.State) + " " + displayStatus(c),
+		cells := make([]string, 0, 6)
+		cells = append(cells, store.ContainerName(c))
+		if v.composeCols {
+			cells = append(cells, v.compose.cell(c))
 		}
+		cells = append(cells,
+			displayImage(c.Image),
+			containerGlyph(c.State)+" "+displayStatus(c),
+		)
 		if v.statsCols {
 			cpu, mem := v.statsCells(c)
 			cells = append(cells, cpu, mem)
