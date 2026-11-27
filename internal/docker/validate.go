@@ -12,14 +12,15 @@ import (
 )
 
 // The engine API addresses objects by path segment (/containers/{id},
-// /volumes/{name}, /images/{name}), and the SDK builds request paths with
-// path.Join, which resolves ".." segments. Identifiers are therefore checked
-// before they reach the SDK, so a malformed or hostile value (for example a
-// name typed into a prompt) can never address a different endpoint.
+// /volumes/{name}, /images/{name}, /networks/{id}), and the SDK builds
+// request paths with path.Join, which resolves ".." segments. Identifiers
+// are therefore checked before they reach the SDK, so a malformed or hostile
+// value (for example a name typed into a prompt) can never address a
+// different endpoint.
 
-// objectNamePattern matches container IDs and names and exec IDs. It is the
-// engine's own pattern for container names, which container and exec IDs
-// (hex) also satisfy.
+// objectNamePattern matches container IDs and names, network IDs and exec
+// IDs. It is the engine's own pattern for container names, which container,
+// network and exec IDs also satisfy.
 var objectNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 // maxObjectNameLen bounds identifiers well above anything the engine
@@ -51,6 +52,12 @@ func ValidateVolumeName(name string) error {
 	}
 	return nil
 }
+
+// ValidateNetworkID checks a network ID. The engine generates them (64 hex
+// characters for local networks, 25 lowercase alphanumerics for Swarm
+// ones), and both satisfy the container name pattern. Network names may
+// contain characters outside it, so drydock addresses networks only by ID.
+func ValidateNetworkID(id string) error { return validateObjectName("network ID", id) }
 
 // ValidateExecID checks an exec instance ID.
 func ValidateExecID(id string) error { return validateObjectName("exec ID", id) }

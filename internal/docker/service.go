@@ -11,6 +11,7 @@ import (
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/jsonstream"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/api/types/volume"
 
 	"github.com/alexnakagama/drydock/internal/docker/dockerctx"
@@ -97,6 +98,19 @@ type Service interface {
 	VolumeCreate(ctx context.Context, name string) (volume.Volume, error)
 	VolumeRemove(ctx context.Context, name string, opts VolumeRemoveOptions) error
 
+	// NetworkList lists every network, including the engine's predefined
+	// ones. The summaries carry no attached containers; a container's
+	// networks are in its own NetworkSettings.
+	NetworkList(ctx context.Context) ([]network.Summary, error)
+	// NetworkInspect returns the decoded inspection data and the raw JSON.
+	// id is a network ID.
+	NetworkInspect(ctx context.Context, id string) (NetworkInspectResult, error)
+	// NetworkRemove removes the network with the given ID. Removal is never
+	// forced: the engine refuses a network a running container is connected
+	// to, and its predefined networks, both with permission denied (HTTP
+	// 403), not a conflict. Stopped containers do not block removal.
+	NetworkRemove(ctx context.Context, id string) error
+
 	// ExecCreate creates a non-interactive exec instance (no TTY, no
 	// attached streams) running cmd in the container, and returns its ID.
 	ExecCreate(ctx context.Context, containerID string, cmd []string) (string, error)
@@ -105,7 +119,9 @@ type Service interface {
 	ExecStart(ctx context.Context, execID string) error
 	ExecInspect(ctx context.Context, execID string) (ExecInspectResult, error)
 
-	// Events subscribes to container, image and volume events. It blocks
+	// Events subscribes to container, image, volume and network events.
+	// Network events include "connect" and "disconnect", which change a
+	// container's attached networks without any container event. It blocks
 	// until the engine has accepted the subscription (or failed to), so it
 	// must not be called on the UI goroutine, and ctx should carry a timeout
 	// or be cancellable. Once it returns, the subscription is active: a
@@ -181,6 +197,13 @@ type ImageInspectResult struct {
 // VolumeInspectResult holds a volume's inspection data.
 type VolumeInspectResult struct {
 	Volume volume.Volume
+	// Raw is the engine's JSON response, unmodified.
+	Raw json.RawMessage
+}
+
+// NetworkInspectResult holds a network's inspection data.
+type NetworkInspectResult struct {
+	Network network.Inspect
 	// Raw is the engine's JSON response, unmodified.
 	Raw json.RawMessage
 }
