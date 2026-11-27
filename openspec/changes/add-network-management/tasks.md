@@ -28,7 +28,7 @@
 
 ## 5. Network drill-down
 
-- [ ] 5.1 Push `NewFilteredContainers` on Enter with crumbs `{name, "containers"}` and a predicate matching the network by ID, or by name for an empty `NetworkID`, the same rule as `buildNetworkUsers` (shared helper); it starts in all mode with shared `Prefs`; verify with tests for the breadcrumb, the scoped `P` confirmation, a created container with an empty `NetworkID` being listed, stats following the session setting, and Esc returning with the network still selected
+- [x] 5.1 Push `NewFilteredContainers` on Enter with crumbs `{name, "containers"}` and a predicate matching the network by ID, or by name for an empty `NetworkID`, the same rule as `buildNetworkUsers` (shared helper); it starts in all mode with shared `Prefs`; verify with tests for the breadcrumb, the scoped `P` confirmation, a created container with an empty `NetworkID` being listed, stats following the session setting, and Esc returning with the network still selected
 
 ## 6. Documentation
 

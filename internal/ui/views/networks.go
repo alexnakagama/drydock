@@ -194,6 +194,8 @@ func (v *networksView) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	switch {
+	case key.Matches(msg, km.Containers):
+		return v.showContainers(n)
 	case key.Matches(msg, km.Delete):
 		return v.confirmDelete(n)
 	case key.Matches(msg, km.Inspect):
@@ -334,6 +336,21 @@ func (v *networksView) inspect(n network.Summary) tea.Cmd {
 		res, err := svc.NetworkInspect(ctx, id)
 		return res.Raw, err
 	}))
+}
+
+// showContainers pushes a containers view listing the containers, running
+// or stopped, attached to the network. The predicate captures the
+// network's ID and raw name and applies store.AttachedToNetwork, the rule
+// behind Snapshot.NetworkUsers, so the drill-down lists exactly the
+// containers counted in IN USE: by ID, or by name for an endpoint without
+// a NetworkID (a container created but never started). The breadcrumb
+// uses the sanitized name.
+func (v *networksView) showContainers(n network.Summary) tea.Cmd {
+	name, id, raw := networkName(n), n.ID, n.Name
+	return ui.Push(NewFilteredContainers(v.st, v.snap, v.prefs, []string{name, "containers"},
+		"No containers are attached to "+name+".", func(c container.Summary) bool {
+			return store.AttachedToNetwork(c, id, raw)
+		}))
 }
 
 // confirmPrune previews the networks that are not built-in and that no
