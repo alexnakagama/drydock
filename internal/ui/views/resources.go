@@ -36,6 +36,11 @@ func Resources(st *store.Store) []ui.Resource {
 			New:   func(snap store.Snapshot) ui.View { return NewVolumes(st, snap, prefs) },
 			Count: store.Snapshot.NumVolumes,
 		},
+		{
+			Name: "projects", Aliases: []string{"pr"},
+			New:   func(snap store.Snapshot) ui.View { return NewProjects(st, snap, prefs) },
+			Count: store.Snapshot.NumProjects,
+		},
 	}
 }
 

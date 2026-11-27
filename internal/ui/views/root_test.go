@@ -85,6 +85,37 @@ func TestTabsSwitchAndHighlightWithRealViews(t *testing.T) {
 	}
 }
 
+func TestProjectsResourceOpens(t *testing.T) {
+	for _, open := range []func(e *env){
+		func(e *env) { e.command("projects") },
+		func(e *env) { e.command("pr") },
+		func(e *env) { e.press("4"); e.settle() },
+	} {
+		e := newEnv(t, projectSample(), 100, 12)
+		open(e)
+		if h := e.header(); !strings.HasPrefix(h, "drydock > projects") {
+			t.Fatalf("header %q, want drydock > projects", h)
+		}
+		if raw := e.m.View().Content; !strings.Contains(raw, components.Styles.TabPillActive.Render("4 projects (4)")) {
+			t.Errorf("projects tab not highlighted with its count:\n%s", e.tabsLine())
+		}
+	}
+}
+
+func TestTabsProjectsCount(t *testing.T) {
+	f := dockerfake.New()
+	e := newEnv(t, f, 100, 12)
+	if tabs := e.tabsLine(); !strings.Contains(tabs, "4 projects (0)") {
+		t.Fatalf("tabs %q, want projects (0) with no Compose container", tabs)
+	}
+	// Two containers of one project count once; a one-off container still
+	// makes its project exist.
+	f.AddContainer(composeCtr(0, "myapp-web-1", "nginx", container.StateRunning, "Up", dockerfake.Compose{Project: "myapp", Service: "web"}))
+	f.AddContainer(composeCtr(1, "myapp-db-1", "postgres", container.StateExited, "Exited (0)", dockerfake.Compose{Project: "myapp", Service: "db"}))
+	f.AddContainer(composeCtr(2, "tools-run-1", "alpine", container.StateExited, "Exited (0)", dockerfake.Compose{Project: "tools", OneOff: true}))
+	e.until("projects count", func() bool { return strings.Contains(e.tabsLine(), "4 projects (2)") })
+}
+
 func TestFooterWideShowsEverything(t *testing.T) {
 	e := newEnv(t, mixedContainers(), 200, 12)
 	e.selectRow("web")
@@ -151,7 +182,7 @@ func TestHelpListsInapplicableKeys(t *testing.T) {
 	e.selectRow("worker")
 	e.press("?")
 	s := e.screen()
-	for _, want := range []string{"x          shell", "l          logs", "1-3/tab    switch resource"} {
+	for _, want := range []string{"x          shell", "l          logs", "1-4/tab    switch resource"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("help lacks %q:\n%s", want, s)
 		}
@@ -166,7 +197,7 @@ func TestHelpFitsAt80x24(t *testing.T) {
 	if !strings.Contains(s, "? or esc to close") || !strings.Contains(s, "╰") {
 		t.Errorf("help overlay is clipped at 80x24:\n%s", s)
 	}
-	for _, want := range []string{"Global", "1-3/tab", "Containers", "l", "/ ", "filter", "t          stats"} {
+	for _, want := range []string{"Global", "1-4/tab", "Containers", "l", "/ ", "filter", "t          stats"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("help lacks %q:\n%s", want, s)
 		}

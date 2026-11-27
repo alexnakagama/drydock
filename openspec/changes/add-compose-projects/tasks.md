@@ -10,15 +10,15 @@
 
 ## 2. Four resource tabs
 
-- [ ] 2.1 Extend `internal/ui/keys` to four tab keys (`tabKeys`, `switchKeys`, `Tab4`, `TabKeys()`, the `Tab1`..`Tab3` comment, help `1-4/tab`) and verify `keys_test.go` passes with the new key and that no view binds `4`
-- [ ] 2.2 Update the root model tests (`model_test.go`) for four resources: number key `4`, `Tab` from the third to the fourth resource, wrap from the fourth to the first, `Shift+Tab` from the first to the fourth, the hard-coded tab strip strings, the narrow-alias width arithmetic in `TestTabsNarrowUseAliases`, and the `1-3/tab` assertion; regenerate `root_100x30.golden`, and verify `go test ./internal/ui/` passes
-- [ ] 2.3 Once the projects resource is registered (task 3.2), update the `1-3/tab` assertions in `internal/ui/views/root_test.go` and the harness's loaded-tabs strings, regenerate every view golden file that shows the tab strip with `-update`, review that the diff changes only the tab strip line, and verify `go test ./internal/ui/views/` passes
+- [x] 2.1 Extend `internal/ui/keys` to four tab keys (`tabKeys`, `switchKeys`, `Tab4`, `TabKeys()`, the `Tab1`..`Tab3` comment, help `1-4/tab`) and verify `keys_test.go` passes with the new key and that no view binds `4`
+- [x] 2.2 Update the root model tests (`model_test.go`) for four resources: number key `4`, `Tab` from the third to the fourth resource, wrap from the fourth to the first, `Shift+Tab` from the first to the fourth, the hard-coded tab strip strings, the narrow-alias width arithmetic in `TestTabsNarrowUseAliases`, and the `1-3/tab` assertion; regenerate `root_100x30.golden`, and verify `go test ./internal/ui/` passes
+- [x] 2.3 Once the projects resource is registered (task 3.2), update the `1-3/tab` assertions in `internal/ui/views/root_test.go` and the harness's loaded-tabs strings, regenerate every view golden file that shows the tab strip with `-update`, review that the diff changes only the tab strip line, and verify `go test ./internal/ui/views/` passes
 
 ## 3. Projects view
 
-- [ ] 3.1 Add `projectsView` in `internal/ui/views` with the PROJECT, RUNNING, STATE and WORKING DIR columns, state glyphs and row tones, `~` for the home directory, the `No Compose projects.` empty message, the filter on PROJECT and WORKING DIR, selection kept across snapshots and `ui.Positioner`; verify with unit tests and new golden files (`projects_100x10.golden`, `projects_empty_100x8.golden`)
-- [ ] 3.2 Register the view as the fourth entry of `views.Resources()` (name `projects`, alias `pr`, `Count: store.Snapshot.NumProjects`) and verify in `root_test.go` that `:projects`, `:pr` and `4` open it and that the tab reads `4 projects (N)`, including `(0)` with no projects
-- [ ] 3.3 Implement Enter: push `NewFilteredContainers` on the project label with crumbs `{project, "containers"}`, including one-off containers; verify with tests for the breadcrumb `drydock > projects > myapp > containers`, the project-scoped `P` confirmation list, and Esc returning with the project still selected
+- [x] 3.1 Add `projectsView` in `internal/ui/views` with the PROJECT, RUNNING, STATE and WORKING DIR columns, state glyphs and row tones, `~` for the home directory, the `No Compose projects.` empty message, the filter on PROJECT and WORKING DIR, selection kept across snapshots and `ui.Positioner`; verify with unit tests and new golden files (`projects_100x10.golden`, `projects_empty_100x8.golden`)
+- [x] 3.2 Register the view as the fourth entry of `views.Resources()` (name `projects`, alias `pr`, `Count: store.Snapshot.NumProjects`) and verify in `root_test.go` that `:projects`, `:pr` and `4` open it and that the tab reads `4 projects (N)`, including `(0)` with no projects
+- [x] 3.3 Implement Enter: push `NewFilteredContainers` on the project label with crumbs `{project, "containers"}`, including one-off containers; verify with tests for the breadcrumb `drydock > projects > myapp > containers`, the project-scoped `P` confirmation list, and Esc returning with the project still selected
 
 ## 4. Project actions
 
