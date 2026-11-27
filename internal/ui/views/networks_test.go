@@ -706,3 +706,156 @@ func TestRemoveNetworkRejectsInvalidID(t *testing.T) {
 		t.Errorf("NetworkRemove called: %v", c)
 	}
 }
+
+func TestNetworkDrillDownToContainers(t *testing.T) {
+	f := networkSample(t)
+	attached(t, f, 3, "other", container.StateExited, "batch_net")
+	e := networksEnv(t, f, 100, 20)
+	e.selectNetwork("myapp_default")
+	e.press("enter")
+	e.until("drill-down", func() bool { return strings.Contains(e.header(), "myapp_default > containers") })
+	// The drill-down starts in all mode, so the exited db is listed too.
+	if h := e.header(); !strings.HasPrefix(h, "drydock > networks > myapp_default > containers [all]") {
+		t.Fatalf("header %q", h)
+	}
+	if e.rowOf("web") == "" || e.rowOf("db") == "" || e.rowOf("job") != "" || e.rowOf("other") != "" {
+		t.Errorf("drill-down lists the wrong containers:\n%s", e.screen())
+	}
+	e.press("esc")
+	if h := e.header(); !strings.HasPrefix(h, "drydock > networks") || strings.Contains(h, "containers") {
+		t.Errorf("header after esc %q", h)
+	}
+	if n, _ := e.networksView().selected(); n.Name != "myapp_default" {
+		t.Errorf("selection after esc %q", n.Name)
+	}
+}
+
+func TestNetworkDrillDownPruneScope(t *testing.T) {
+	f := networkSample(t)
+	attached(t, f, 3, "other", container.StateExited, "batch_net")
+	e := networksEnv(t, f, 100, 24)
+	e.selectNetwork("myapp_default")
+	e.press("enter")
+	e.until("drill-down", func() bool { return strings.Contains(e.header(), "myapp_default > containers") })
+	e.openPrune()
+	if got, want := e.pruneListed(), []string{"db exited"}; !slices.Equal(got, want) {
+		t.Errorf("listed %v, want %v", got, want)
+	}
+	e.press("n")
+	e.settle()
+	if c := f.CallsTo(dockerfake.MethodContainerRemove); len(c) != 0 {
+		t.Errorf("ContainerRemove called after cancel: %v", c)
+	}
+}
+
+func TestNetworkDrillDownListsCreatedContainer(t *testing.T) {
+	f := networkSample(t)
+	// A container created but never started: the engine lists its
+	// endpoint without a NetworkID, so only the name identifies the
+	// network.
+	c := ctr(cid(3), "fresh", "nginx", container.StateCreated, "Created")
+	ns, err := f.NetworkSettings("old-net")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.NetworkSettings = dockerfake.WithoutNetworkIDs(ns)
+	f.AddContainer(c)
+	e := networksEnv(t, f, 100, 20)
+	e.selectNetwork("old-net")
+	e.press("enter")
+	e.until("drill-down", func() bool { return strings.Contains(e.header(), "old-net > containers") })
+	if e.rowOf("fresh") == "" || e.rowOf("web") != "" || e.rowOf("db") != "" {
+		t.Errorf("drill-down lists the wrong containers:\n%s", e.screen())
+	}
+}
+
+func TestNetworkDrillDownRecreatedNetwork(t *testing.T) {
+	// A container attached by ID to a network that was removed and
+	// recreated under the same name does not belong to the new network.
+	f := dockerfake.New()
+	addNetwork(t, f, network.Network{Name: "app"})
+	attached(t, f, 0, "stale", container.StateExited, "app")
+	ids := networkIDs(t, f)
+	for id, name := range ids {
+		if name == "app" {
+			if !f.RemoveNetwork(id) {
+				t.Fatalf("RemoveNetwork(%s) found no network", id)
+			}
+		}
+	}
+	addNetwork(t, f, network.Network{Name: "app"})
+	e := networksEnv(t, f, 100, 20)
+	e.selectNetwork("app")
+	e.press("enter")
+	e.until("drill-down", func() bool { return strings.Contains(e.header(), "app > containers") })
+	e.until("empty drill-down", func() bool { return strings.Contains(e.screen(), "No containers are attached to app.") })
+	if e.rowOf("stale") != "" {
+		t.Errorf("container of the removed network listed:\n%s", e.screen())
+	}
+}
+
+func TestNetworkDrillDownFollowsStatsSetting(t *testing.T) {
+	f := networkSample(t)
+	e := newEnv(t, f, 120, 16)
+	e.press("t")
+	e.waitStreams(1)
+	e.command("networks")
+	e.waitStreams(0)
+	e.selectNetwork("myapp_default")
+	e.press("enter")
+	e.until("drill-down", func() bool { return strings.Contains(e.header(), "myapp_default > containers") })
+	if got := e.headerTitles(); !slices.Contains(got, "CPU") || !slices.Contains(got, "MEM") {
+		t.Errorf("drill-down columns %q, want CPU and MEM", got)
+	}
+	// Only the running web is streamed.
+	e.waitStreams(1)
+	e.press("esc")
+	e.waitStreams(0)
+}
+
+func TestNetworkDrillDownHostileName(t *testing.T) {
+	// The engine's network names are untrusted: the breadcrumb and empty
+	// text show them sanitized, while matching uses the raw name, so a
+	// created container known only by that name is still listed.
+	const hostile = "evil\x1b[31mnet\x07"
+	const unused = "void\x1b]0;pwned\x07net"
+	f := dockerfake.New()
+	addNetwork(t, f, network.Network{Name: hostile})
+	addNetwork(t, f, network.Network{Name: unused})
+	c := ctr(cid(0), "fresh", "nginx", container.StateCreated, "Created")
+	ns, err := f.NetworkSettings(hostile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.NetworkSettings = dockerfake.WithoutNetworkIDs(ns)
+	f.AddContainer(c)
+	e := networksEnv(t, f, 120, 20)
+
+	noControl := func(what string) {
+		t.Helper()
+		raw := e.m.View().Content
+		for _, bad := range []string{"\x1b[31mnet", "\x07", "\x1b]0;"} {
+			if strings.Contains(raw, bad) {
+				t.Errorf("%s: %q reached the terminal:\n%q", what, bad, raw)
+			}
+		}
+	}
+
+	e.selectNetwork(hostile)
+	e.press("enter")
+	e.until("drill-down", func() bool { return strings.Contains(e.header(), " > containers") })
+	if h, want := e.header(), "drydock > networks > "+networkName(network.Summary{Name: hostile})+" > containers"; !strings.HasPrefix(h, want) {
+		t.Errorf("header %q, want prefix %q", h, want)
+	}
+	if e.rowOf("fresh") == "" {
+		t.Errorf("container attached by the raw name not listed:\n%s", e.screen())
+	}
+	noControl("drill-down")
+	e.press("esc")
+
+	e.selectNetwork(unused)
+	e.press("enter")
+	want := "No containers are attached to " + networkName(network.Summary{Name: unused}) + "."
+	e.until("empty drill-down", func() bool { return strings.Contains(e.screen(), want) })
+	noControl("empty drill-down")
+}
