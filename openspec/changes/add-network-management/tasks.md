@@ -14,8 +14,8 @@
 
 ## 3. Five resource tabs
 
-- [ ] 3.1 Extend `internal/ui/keys` to five tab keys (`Tab5`, `TabKeys()`, `tabKeys`/`switchKeys`, help `1-5/tab`), rename `TestFourTabKeys`, and update the `1-4/tab` assertions in `internal/ui/views/root_test.go`; verify `go test ./internal/ui/keys/ ./internal/ui/views/` passes (`TestSwitchKeysReserved` shows no view binds `5`)
-- [ ] 3.2 Update the root model tests (`model_test.go`) for five resources: number key `5`, `Tab` from projects to networks, wrap from networks to containers, `Shift+Tab` from containers to networks, the tab strip strings and narrow-alias width arithmetic; regenerate `root_100x30.golden` and add an 80-column case showing the alias fallback; verify `go test ./internal/ui/` passes
+- [x] 3.1 Extend `internal/ui/keys` to five tab keys (`Tab5`, `TabKeys()`, `tabKeys`/`switchKeys`, help `1-5/tab`), rename `TestFourTabKeys`, and update the `1-4/tab` assertions in `internal/ui/views/root_test.go`; verify `go test ./internal/ui/keys/ ./internal/ui/views/` passes (`TestSwitchKeysReserved` shows no view binds `5`)
+- [x] 3.2 Update the root model tests (`model_test.go`) for five resources: number key `5`, `Tab` from projects to networks, wrap from networks to containers, `Shift+Tab` from containers to networks, the tab strip strings and narrow-alias width arithmetic; regenerate `root_100x30.golden` and add an 80-column case showing the alias fallback; verify `go test ./internal/ui/` passes
 
 ## 4. Networks view
 

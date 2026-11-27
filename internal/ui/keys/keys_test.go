@@ -129,11 +129,11 @@ func TestContainersBindingsListPauseAndPrune(t *testing.T) {
 	}
 }
 
-// TestFourTabKeys fails if a number key is missing for one of the four
+// TestFiveTabKeys fails if a number key is missing for one of the five
 // resources, or if a tab key is not reserved from the views.
-func TestFourTabKeys(t *testing.T) {
+func TestFiveTabKeys(t *testing.T) {
 	tabs := Global.TabKeys()
-	want := []string{"1", "2", "3", "4"}
+	want := []string{"1", "2", "3", "4", "5"}
 	if len(tabs) != len(want) {
 		t.Fatalf("TabKeys() has %d bindings, want %d", len(tabs), len(want))
 	}
@@ -145,7 +145,7 @@ func TestFourTabKeys(t *testing.T) {
 			t.Errorf("tab key %q is not reserved in switchKeys", want[i])
 		}
 	}
-	if got := Global.SwitchHelp.Help().Key; got != "1-4/tab" {
-		t.Errorf("SwitchHelp help key %q, want %q", got, "1-4/tab")
+	if got := Global.SwitchHelp.Help().Key; got != "1-5/tab" {
+		t.Errorf("SwitchHelp help key %q, want %q", got, "1-5/tab")
 	}
 }

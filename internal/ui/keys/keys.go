@@ -13,13 +13,14 @@ type GlobalMap struct {
 	// focused. It is not shown in the footer.
 	ForceQuit key.Binding
 
-	// Tab1 to Tab4 switch to the resource with that number, and NextTab
+	// Tab1 to Tab5 switch to the resource with that number, and NextTab
 	// and PrevTab cycle through the resources. They are used only for
 	// matching and have no help: SwitchHelp documents them all.
 	Tab1    key.Binding
 	Tab2    key.Binding
 	Tab3    key.Binding
 	Tab4    key.Binding
+	Tab5    key.Binding
 	NextTab key.Binding
 	PrevTab key.Binding
 	// SwitchHelp is display-only: it lists the resource-switching keys as a
@@ -33,10 +34,10 @@ type GlobalMap struct {
 // by SwitchHelp, so the help cannot drift from what is matched. They are
 // reserved: no view may bind them, since the root takes them first.
 var (
-	tabKeys    = [...]string{"1", "2", "3", "4"}
+	tabKeys    = [...]string{"1", "2", "3", "4", "5"}
 	nextTabKey = "tab"
 	prevTabKey = "shift+tab"
-	switchKeys = []string{tabKeys[0], tabKeys[1], tabKeys[2], tabKeys[3], nextTabKey, prevTabKey}
+	switchKeys = append(tabKeys[:], nextTabKey, prevTabKey)
 )
 
 // Global is the global keymap.
@@ -51,9 +52,10 @@ var Global = GlobalMap{
 	Tab2:       key.NewBinding(key.WithKeys(tabKeys[1])),
 	Tab3:       key.NewBinding(key.WithKeys(tabKeys[2])),
 	Tab4:       key.NewBinding(key.WithKeys(tabKeys[3])),
+	Tab5:       key.NewBinding(key.WithKeys(tabKeys[4])),
 	NextTab:    key.NewBinding(key.WithKeys(nextTabKey)),
 	PrevTab:    key.NewBinding(key.WithKeys(prevTabKey)),
-	SwitchHelp: key.NewBinding(key.WithKeys(switchKeys...), key.WithHelp("1-4/tab", "switch resource")),
+	SwitchHelp: key.NewBinding(key.WithKeys(switchKeys...), key.WithHelp("1-5/tab", "switch resource")),
 }
 
 // Bindings returns the global bindings in display order. The
@@ -65,7 +67,7 @@ func (m GlobalMap) Bindings() []key.Binding {
 // TabKeys returns the keys that jump to a resource, in resource order: the
 // first selects resource 0.
 func (m GlobalMap) TabKeys() []key.Binding {
-	return []key.Binding{m.Tab1, m.Tab2, m.Tab3, m.Tab4}
+	return []key.Binding{m.Tab1, m.Tab2, m.Tab3, m.Tab4, m.Tab5}
 }
 
 // TableMap holds the navigation and filter keys shared by every list view.

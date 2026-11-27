@@ -155,6 +155,7 @@ const (
 	countImages     = 34
 	countVolumes    = 5
 	countProjects   = 3
+	countNetworks   = 6
 )
 
 func constCount(n int) func(store.Snapshot) int { return func(store.Snapshot) int { return n } }
@@ -180,6 +181,7 @@ func newHarnessAt(t *testing.T, initial string, opts ...Option) *harness {
 		{Name: "images", Aliases: []string{"im"}, Count: constCount(countImages), New: mk("images", row("i1", "nginx:1.27", "sha256:abc", "180MB"))},
 		{Name: "volumes", Aliases: []string{"vol"}, Count: constCount(countVolumes), New: mk("volumes")},
 		{Name: "projects", Aliases: []string{"pr"}, Count: constCount(countProjects), New: mk("projects")},
+		{Name: "networks", Aliases: []string{"net"}, Count: constCount(countNetworks), New: mk("networks")},
 	}, initial, opts...)
 	h.m.after = func(d time.Duration, fn func(time.Time) tea.Msg) tea.Cmd {
 		h.timers = append(h.timers, timer{d: d, fn: fn})
@@ -324,6 +326,32 @@ func TestGoldenRootView(t *testing.T) {
 	}
 
 	checkGolden(t, "root_100x30.golden", got)
+}
+
+// TestGoldenRootViewNarrow pins the 80-column layout, where the five full
+// tab labels no longer fit and the strip falls back to the aliases.
+func TestGoldenRootViewNarrow(t *testing.T) {
+	h := newHarness(t)
+	h.update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	h.update(store.ConnectionMsg{State: store.StateConnected})
+	h.loaded()
+	h.press("j") // select web
+	got := h.screen()
+
+	lines := strings.Split(got, "\n")
+	if len(lines) != 24 {
+		t.Fatalf("screen has %d lines, want 24", len(lines))
+	}
+	for i, l := range strings.Split(h.m.render(), "\n") {
+		if w := ansi.StringWidth(l); w != 80 {
+			t.Errorf("line %d is %d cells wide, want 80", i+1, w)
+		}
+	}
+	if plain := ansi.Strip(lines[1]); !strings.HasPrefix(plain, "  1 co (12)   2 im (34)   3 vol (5)   4 pr (3)   5 net (6)  ") {
+		t.Errorf("tabs %q, want the alias fallback", plain)
+	}
+
+	checkGolden(t, "root_80x24.golden", got)
 }
 
 func TestLayoutStartsOnContainers(t *testing.T) {
@@ -1565,6 +1593,11 @@ func TestDigitSwitchesResource(t *testing.T) {
 	if hd := h.header(); !strings.HasPrefix(hd, "drydock > projects") {
 		t.Errorf("header %q, want drydock > projects", hd)
 	}
+	h.press("5")
+	h.onlyView("networks")
+	if hd := h.header(); !strings.HasPrefix(hd, "drydock > networks") {
+		t.Errorf("header %q, want drydock > networks", hd)
+	}
 	h.press("1")
 	h.onlyView("containers")
 }
@@ -1580,12 +1613,14 @@ func TestDigitWithoutResourceIsNoop(t *testing.T) {
 		{Name: "volumes", New: func(store.Snapshot) View { return newListView("volumes") }},
 	}, "containers")
 	v := m.top()
-	_, cmd := m.Update(uitest.KeyPress("4"))
-	if cmd != nil {
-		t.Error("4 without a fourth resource returned a command")
-	}
-	if m.top() != v || len(m.stack) != 1 || m.rootIdx != 0 {
-		t.Errorf("4 changed the stack: %d views, root %d", len(m.stack), m.rootIdx)
+	for _, k := range []string{"4", "5"} {
+		_, cmd := m.Update(uitest.KeyPress(k))
+		if cmd != nil {
+			t.Errorf("%s without a resource behind it returned a command", k)
+		}
+		if m.top() != v || len(m.stack) != 1 || m.rootIdx != 0 {
+			t.Errorf("%s changed the stack: %d views, root %d", k, len(m.stack), m.rootIdx)
+		}
 	}
 	if len(got) != 0 {
 		t.Errorf("view received keys %q, want none", got)
@@ -1609,13 +1644,17 @@ func TestTabCyclesResources(t *testing.T) {
 	h := newHarnessAt(t, "volumes")
 	h.press("tab")
 	h.onlyView("projects")
-	h.press("tab") // wraps from the fourth to the first
+	h.press("tab")
+	h.onlyView("networks")
+	h.press("tab") // wraps from the fifth to the first
 	h.onlyView("containers")
 	h.press("tab")
 	h.onlyView("images")
 
 	h = newHarness(t)
-	h.press("shift+tab") // wraps from the first to the fourth
+	h.press("shift+tab") // wraps from the first to the fifth
+	h.onlyView("networks")
+	h.press("shift+tab")
 	h.onlyView("projects")
 	h.press("shift+tab")
 	h.onlyView("volumes")
@@ -1769,11 +1808,11 @@ func TestTabsShowCounts(t *testing.T) {
 	h := newHarness(t)
 	// Pills are padded by one cell on each side and joined by one space.
 	before := ansi.Strip(h.tabsLine())
-	if !strings.HasPrefix(before, "  1 containers   2 images   3 volumes   4 projects  ") {
+	if !strings.HasPrefix(before, "  1 containers   2 images   3 volumes   4 projects   5 networks  ") {
 		t.Errorf("tabs before the first load %q, want no counts", before)
 	}
 	h.loaded()
-	const loadedTabs = "  1 containers (12)   2 images (34)   3 volumes (5)   4 projects (3)  "
+	const loadedTabs = "  1 containers (12)   2 images (34)   3 volumes (5)   4 projects (3)   5 networks (6)  "
 	line := h.tabsLine()
 	if plain := ansi.Strip(line); !strings.HasPrefix(plain, loadedTabs) {
 		t.Errorf("tabs %q, want parenthesized counts", plain)
@@ -1783,6 +1822,7 @@ func TestTabsShowCounts(t *testing.T) {
 		st.TabPill.Render("2 images (34)"),
 		st.TabPill.Render("3 volumes (5)"),
 		st.TabPill.Render("4 projects (3)"),
+		st.TabPill.Render("5 networks (6)"),
 	} {
 		if !strings.Contains(line, want) {
 			t.Errorf("tabs %q lack %q", line, want)
@@ -1812,6 +1852,7 @@ func TestTabsCountsNotYetLoaded(t *testing.T) {
 		st.TabPill.Render("2 images"),
 		st.TabPill.Render("3 volumes"),
 		st.TabPill.Render("4 projects"),
+		st.TabPill.Render("5 networks"),
 	} {
 		if !strings.Contains(line, want) {
 			t.Errorf("tabs %q lack %q", ansi.Strip(line), ansi.Strip(want))
@@ -1853,15 +1894,15 @@ func TestTabsNarrowUseAliases(t *testing.T) {
 	st := components.Styles
 	h := newHarness(t)
 	h.loaded()
-	// Full pills plus the position need 1+68+1+3+1 = 74 cells, short ones
-	// 1+46+1+3+1 = 52.
-	const width = 64
+	// Full pills plus the position need 1+85+1+3+1 = 91 cells, short ones
+	// 1+58+1+3+1 = 64.
+	const width = 72
 	h.update(tea.WindowSizeMsg{Width: width, Height: 10})
 	line := h.tabsLine()
 	if strings.Contains(ansi.Strip(line), "containers") {
 		t.Errorf("narrow tabs %q use the full names", ansi.Strip(line))
 	}
-	for _, want := range []string{st.TabPillActive.Render("1 co (12)"), st.TabPill.Render("2 im (34)"), st.TabPill.Render("3 vol (5)"), st.TabPill.Render("4 pr (3)")} {
+	for _, want := range []string{st.TabPillActive.Render("1 co (12)"), st.TabPill.Render("2 im (34)"), st.TabPill.Render("3 vol (5)"), st.TabPill.Render("4 pr (3)"), st.TabPill.Render("5 net (6)")} {
 		if !strings.Contains(line, want) {
 			t.Errorf("narrow tabs %q lack %q", ansi.Strip(line), ansi.Strip(want))
 		}
@@ -1877,10 +1918,10 @@ func TestTabsNarrowUseAliases(t *testing.T) {
 	for _, tc := range []struct {
 		width int
 		full  bool
-	}{{74, true}, {73, false}} {
+	}{{91, true}, {90, false}, {64, false}} {
 		h.update(tea.WindowSizeMsg{Width: tc.width, Height: 10})
 		plain := ansi.Strip(h.tabsLine())
-		if got := strings.Contains(plain, "4 projects (3)"); got != tc.full {
+		if got := strings.Contains(plain, "5 networks (6)"); got != tc.full {
 			t.Errorf("width %d: tabs %q, full names %v, want %v", tc.width, plain, got, tc.full)
 		}
 		if strings.Contains(plain, "…") {
@@ -1889,13 +1930,13 @@ func TestTabsNarrowUseAliases(t *testing.T) {
 	}
 
 	// A resource without an alias keeps its name. Full pills need
-	// 1+27+1+3+1 = 33 cells with the 0/0 position, short ones 25.
+	// 1+26+1+3+1 = 32 cells with the 0/0 position, short ones 24.
 	m := New([]Resource{
 		{Name: "containers", Aliases: []string{"co"}, New: func(store.Snapshot) View { return newListView("containers") }},
-		{Name: "networks", New: func(store.Snapshot) View { return newListView("networks") }},
+		{Name: "secrets", New: func(store.Snapshot) View { return newListView("secrets") }},
 	}, "containers")
 	m.Update(tea.WindowSizeMsg{Width: 28, Height: 10})
-	if got := ansi.Strip(strings.Split(m.render(), "\n")[1]); !strings.HasPrefix(got, "  1 co   2 networks  ") {
+	if got := ansi.Strip(strings.Split(m.render(), "\n")[1]); !strings.HasPrefix(got, "  1 co   2 secrets  ") {
 		t.Errorf("tabs %q, want the alias and the bare name", got)
 	}
 }
@@ -1997,7 +2038,8 @@ func TestShortTerminalHasNoTabs(t *testing.T) {
 
 	h.update(tea.WindowSizeMsg{Width: 80, Height: 5})
 	lines = strings.Split(h.screen(), "\n")
-	if len(lines) != 5 || !strings.Contains(lines[1], "1 containers (12)") {
+	// At 80 columns the five tabs use their aliases.
+	if len(lines) != 5 || !strings.Contains(lines[1], "1 co (12)") {
 		t.Errorf("at height 5 the tab strip is missing:\n%s", h.screen())
 	}
 	if _, ch := h.m.contentSize(); ch != 1 {
@@ -2090,11 +2132,11 @@ func TestHelpListsSwitchKeysOnce(t *testing.T) {
 	h := newHarness(t)
 	h.press("?")
 	s := h.screen()
-	if !strings.Contains(s, "1-4/tab    switch resource") {
+	if !strings.Contains(s, "1-5/tab    switch resource") {
 		t.Errorf("help lacks the full switch entry:\n%s", s)
 	}
 	for _, k := range []string{"shift+tab", "tab "} {
-		if strings.Contains(s, k) && !strings.Contains(s, "1-4/"+k) {
+		if strings.Contains(s, k) && !strings.Contains(s, "1-5/"+k) {
 			t.Errorf("help lists %q on its own:\n%s", k, s)
 		}
 	}

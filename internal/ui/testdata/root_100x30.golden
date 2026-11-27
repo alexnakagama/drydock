@@ -1,5 +1,5 @@
  drydock > containers                                                                   ● connected 
-  1 containers   2 images   3 volumes   4 projects                                              2/3 
+  1 containers   2 images   3 volumes   4 projects   5 networks                                 2/3 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
   NAME          IMAGE                                                                   STATUS      
   db            postgres:16                                                             Up 2 hours  
