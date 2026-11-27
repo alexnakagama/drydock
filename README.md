@@ -2,13 +2,15 @@
 
 [![CI](https://github.com/alexnakagama/drydock/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/alexnakagama/drydock/actions/workflows/ci.yml)
 
-A terminal UI for managing a local Docker engine: containers, images and
-volumes, with live updates from the engine's event stream.
+A terminal UI for managing a local Docker engine: containers, images,
+volumes and Compose projects, with live updates from the engine's event
+stream.
 
 drydock lists, filters and acts on containers (start, stop, pause, restart,
-delete, logs, inspect, shell, prune), images (pull, delete, inspect, prune)
-and volumes (create, delete, inspect, prune). It is pre-1.0: key bindings and
-behavior may still change between minor versions.
+delete, logs, inspect, shell, prune), images (pull, delete, inspect, prune),
+volumes (create, delete, inspect, prune) and Compose projects (start, stop,
+restart). It is pre-1.0: key bindings and behavior may still change between
+minor versions.
 
 ## Install
 
@@ -174,13 +176,15 @@ first, keeping the full connection state; only if the breadcrumb is still
 that short is the state shortened to its symbol (`●`).
 
 On terminals at least 5 lines tall, a tab strip below the header lists the
-resources as pills with their counts in parentheses, for example
-`1 containers (12)`, `2 images (34)` and `3 volumes (5)`, and fills the pill
-of the one the current view belongs to. On narrow terminals the tabs use
-short aliases instead, for example `1 co (12)`. Counts appear once the first
-snapshot has loaded.
-They are engine totals: every container whatever the `a` toggle, and every
-image object, dangling ones included. On the right of the strip, list views
+resources as pills with their counts in parentheses, for example `1
+containers (12)`, `2 images (34)`, `3 volumes (5)` and `4 projects (3)`, and
+fills the pill of the one the current view belongs to. On narrow terminals
+the tabs use short aliases instead, for example `1 co (12)` or `4 pr (3)`.
+Counts appear once the first snapshot has loaded. The container, image and
+volume counts are engine totals: every container whatever the `a` toggle, and
+every image object, dangling ones included. The projects count is the number
+of distinct Compose project names among the containers' labels; the projects
+tab is shown even when it is `(0)`. On the right of the strip, list views
 show the selected row and how many rows are listed: `3/12`, or `3/5 of 12`
 while a filter is applied. The number after `of` counts the rows of the
 current view, so with `a` off it can be lower than the tab count. On
@@ -232,13 +236,42 @@ screen, and only for the running containers of that view, including those a
 `/` filter hides. On narrow terminals, the `t` hint is the first footer
 hint dropped; `?` still lists it.
 
+The projects view (`4` or `:projects`) lists one row per Compose project,
+derived from the `com.docker.compose.project` label Docker Compose puts on
+every container it creates, sorted by name. drydock does not read Compose
+files or run the `docker compose` CLI. The columns are PROJECT, RUNNING
+(running/total service containers), STATE (`running` when every service
+container is running, `exited` when every one is exited, created or dead,
+`partial` otherwise, for example with one container paused) and WORKING
+DIR, with your home directory shown as `~`. A project disappears once its
+last container is removed. Containers created by
+`docker compose run` (one-off containers) are listed in the project's
+drill-down but are not counted in RUNNING or STATE and are never acted on.
+
+`Enter` opens the project's containers, where `P` prunes only that project's
+stopped containers. `s` stops the project's running service containers or,
+when none is running, starts its created and exited ones; `r` restarts every
+service container that is not paused. Paused containers are never touched;
+press `p` on the container to unpause it first. The containers are acted on
+in parallel, without confirmation; when some fail, the status line names them
+and shows the first error. Start only starts containers that already exist:
+unlike `docker compose up`, it does not create services whose containers were
+removed, and it does not follow `depends_on` ordering.
+
+While any container in the engine belongs to a Compose project, every
+containers view shows a column after NAME: PROJECT in the root containers
+view and in the image and volume drill-downs, and SERVICE in a project's
+drill-down. Containers without the label show `-`. The column is shown
+whatever the `a` toggle and the filter, and `/` also matches it. With no
+Compose container the column is not shown.
+
 Global keys and list navigation:
 
 | Key               | Action                                                        |
 |-------------------|---------------------------------------------------------------|
-| `1`/`2`/`3`       | Switch to containers/images/volumes (no-op if already there)  |
+| `1`-`4`           | Switch to containers/images/volumes/projects (no-op if already there) |
 | `Tab`/`Shift+Tab` | Switch to the next/previous resource                          |
-| `:`               | Command bar: `containers`, `images`, `volumes` (`co`, `im`, `vol`) |
+| `:`               | Command bar: `containers`, `images`, `volumes`, `projects` (`co`, `im`, `vol`, `pr`) |
 | `/`               | Filter the list (case-insensitive); Esc clears it             |
 | `j`/`k`, arrows   | Move the selection; `g`/`G` jump to the first/last row        |
 | `Esc`             | Clear the filter, otherwise go back to the previous view      |
@@ -248,15 +281,16 @@ Global keys and list navigation:
 Actions in the resource views. Delete and prune ask for confirmation first.
 Container prune removes only the stopped (exited, created or dead) containers
 in the view's scope: every container in the root view, or only the containers
-using that image or volume in a drill-down, including ones hidden by `a` or a
-`/` filter. Running, paused and restarting containers are never removed, and
-the pruned containers' volumes are kept:
+using that image or volume, or belonging to that project, in a drill-down,
+including ones hidden by `a` or a `/` filter. Running, paused and restarting
+containers are never removed, and the pruned containers' volumes are kept:
 
 | View       | Keys                                                               |
 |------------|--------------------------------------------------------------------|
 | Containers | `s` start/stop, `p` pause/unpause, `r` restart, `d` delete, `l` logs, `i` inspect, `x` shell, `a` all/running, `P` prune stopped, `t` stats/ports |
 | Images     | `Enter` containers using it, `p` pull, `d` delete, `i` inspect, `P` prune dangling, `a` all/tagged |
 | Volumes    | `Enter` containers using it, `c` create, `d` delete, `i` inspect, `P` prune unused |
+| Projects   | `Enter` containers, `s` start/stop, `r` restart                    |
 | Logs       | `G` follow, `/` search, `r` reopen an ended stream                 |
 
 Flags:
