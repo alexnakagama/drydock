@@ -182,7 +182,7 @@ func TestHelpListsInapplicableKeys(t *testing.T) {
 	e.selectRow("worker")
 	e.press("?")
 	s := e.screen()
-	for _, want := range []string{"x          shell", "l          logs", "1-4/tab    switch resource"} {
+	for _, want := range []string{"x          shell", "l          logs", "1-5/tab    switch resource"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("help lacks %q:\n%s", want, s)
 		}
@@ -197,7 +197,7 @@ func TestHelpFitsAt80x24(t *testing.T) {
 	if !strings.Contains(s, "? or esc to close") || !strings.Contains(s, "╰") {
 		t.Errorf("help overlay is clipped at 80x24:\n%s", s)
 	}
-	for _, want := range []string{"Global", "1-4/tab", "Containers", "l", "/ ", "filter", "t          stats"} {
+	for _, want := range []string{"Global", "1-5/tab", "Containers", "l", "/ ", "filter", "t          stats"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("help lacks %q:\n%s", want, s)
 		}
