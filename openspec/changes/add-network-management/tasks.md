@@ -32,7 +32,7 @@
 
 ## 6. Documentation
 
-- [ ] 6.1 Update the README: tab strip and counts with five resources, `1`-`5` and `:networks`/`net`, the networks row of the keys table, unused networks dimmed, built-in networks not deletable, and how `P` differs from `docker network prune`; verify the keys table matches the help overlay
+- [x] 6.1 Update the README: tab strip and counts with five resources, `1`-`5` and `:networks`/`net`, the networks row of the keys table, unused networks dimmed, built-in networks not deletable, and how `P` differs from `docker network prune`; verify the keys table matches the help overlay
 
 ## 7. Integration checks
 

@@ -3,14 +3,14 @@
 [![CI](https://github.com/alexnakagama/drydock/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/alexnakagama/drydock/actions/workflows/ci.yml)
 
 A terminal UI for managing a local Docker engine: containers, images,
-volumes and Compose projects, with live updates from the engine's event
-stream.
+volumes, Compose projects and networks, with live updates from the engine's
+event stream.
 
 drydock lists, filters and acts on containers (start, stop, pause, restart,
 delete, logs, inspect, shell, prune), images (pull, delete, inspect, prune),
-volumes (create, delete, inspect, prune) and Compose projects (start, stop,
-restart). It is pre-1.0: key bindings and behavior may still change between
-minor versions.
+volumes (create, delete, inspect, prune), Compose projects (start, stop,
+restart) and networks (delete, inspect, prune). It is pre-1.0: key bindings
+and behavior may still change between minor versions.
 
 ## Install
 
@@ -176,30 +176,30 @@ first, keeping the full connection state; only if the breadcrumb is still
 that short is the state shortened to its symbol (`●`).
 
 On terminals at least 5 lines tall, a tab strip below the header lists the
-resources as pills with their counts in parentheses, for example `1
-containers (12)`, `2 images (34)`, `3 volumes (5)` and `4 projects (3)`, and
-fills the pill of the one the current view belongs to. On narrow terminals
-the tabs use short aliases instead, for example `1 co (12)` or `4 pr (3)`.
-Counts appear once the first snapshot has loaded. The container, image and
-volume counts are engine totals: every container whatever the `a` toggle, and
-every image object, dangling ones included. The projects count is the number
-of distinct Compose project names among the containers' labels; the projects
-tab is shown even when it is `(0)`. On the right of the strip, list views
-show the selected row and how many rows are listed: `3/12`, or `3/5 of 12`
-while a filter is applied. The number after `of` counts the rows of the
-current view, so with `a` off it can be lower than the tab count. On
-terminals at least 12 lines tall, a thin rule separates the tab strip from
-the list.
+resources as pills with their counts in parentheses, for example `1 containers
+(12)`, `2 images (34)`, `3 volumes (5)`, `4 projects (3)` and `5 networks
+(6)`, and fills the pill of the one the current view belongs to. On narrow
+terminals the tabs use short aliases instead, for example `1 co (12)` or `5
+net (6)`. Counts appear once the first snapshot has loaded. The container,
+image, volume and network counts are engine totals: every container whatever
+the `a` toggle, every image object, dangling ones included, and every network,
+built-in ones included. The projects count is the number of distinct Compose
+project names among the containers' labels; the projects tab is shown even
+when it is `(0)`. On the right of the strip, list views show the selected row
+and how many rows are listed: `3/12`, or `3/5 of 12` while a filter is
+applied. The number after `of` counts the rows of the current view, so with
+`a` off it can be lower than the tab count. On terminals at least 12 lines
+tall, a thin rule separates the tab strip from the list.
 
-Rows are colored by state. Running containers are green. Paused and
-restarting containers are orange. Exited, created and dead containers,
-dangling images and unused volumes are dimmed. The containers view also
-starts each STATUS cell with a state glyph: `●` running, `◐` paused or
+Rows are colored by state. Running containers are green. Paused and restarting
+containers are orange. Exited, created and dead containers, dangling images,
+and volumes and networks no container uses are dimmed. The containers view
+also starts each STATUS cell with a state glyph: `●` running, `◐` paused or
 restarting, `○` exited, created or dead. The selected row is highlighted and
 marked with `▌` in its leftmost column, without its state color; its glyph
-still shows its state. Colors follow the terminal's light or dark
-background, and the marker and glyphs keep the selection and states readable
-without color (for example with `NO_COLOR` set).
+still shows its state. Colors follow the terminal's light or dark background,
+and the marker and glyphs keep the selection and states readable without color
+(for example with `NO_COLOR` set).
 
 The footer shows only the keys that apply to the selected row, most
 important first. For example, `x shell` appears only on a running container,
@@ -259,19 +259,45 @@ unlike `docker compose up`, it does not create services whose containers were
 removed, and it does not follow `depends_on` ordering.
 
 While any container in the engine belongs to a Compose project, every
-containers view shows a column after NAME: PROJECT in the root containers
-view and in the image and volume drill-downs, and SERVICE in a project's
+containers view shows a column after NAME: PROJECT in the root containers view
+and in the image, volume and network drill-downs, and SERVICE in a project's
 drill-down. Containers without the label show `-`. The column is shown
 whatever the `a` toggle and the filter, and `/` also matches it. With no
 Compose container the column is not shown.
+
+The networks view (`5` or `:networks`) lists every network, sorted by name,
+with the columns NAME, DRIVER, SCOPE, SUBNET and IN USE. SUBNET shows the
+first IPv4 subnet (or the first subnet when there is no IPv4 one), followed
+by `+N` when the network has N more, or `-` when it has none. IN USE counts
+the containers attached to the network, running or stopped; networks with
+none are dimmed. `Enter` opens the attached containers; `P` there prunes only
+the stopped ones, as in any containers view. `i` shows the network's
+inspection JSON.
+
+The built-in networks, `bridge`, `host`, `none` and the Swarm ingress
+network, are listed like any other but cannot be deleted: `d` is not shown
+for them, and pressing it only reports an error. On any other network, `d`
+asks for confirmation and names the attached containers. With a running
+container attached, the engine refuses the removal; with only stopped ones,
+the network is removed and those containers will not start until they are
+reconnected to a network. Removal is never forced.
+
+`P` in the networks view lists the networks that are not built-in and that
+no container uses, running or stopped, and on confirmation removes exactly
+those. This differs from `docker network prune`, which removes every network
+with no active endpoints, in practice every network without a running or
+paused container attached: a network whose only users are stopped
+containers, such as the `<project>_default` network of a stopped Compose
+project, is removed by `docker network prune` but kept by drydock, so those
+containers can still start.
 
 Global keys and list navigation:
 
 | Key               | Action                                                        |
 |-------------------|---------------------------------------------------------------|
-| `1`-`4`           | Switch to containers/images/volumes/projects (no-op if already there) |
+| `1`-`5`           | Switch to containers/images/volumes/projects/networks (no-op if already there) |
 | `Tab`/`Shift+Tab` | Switch to the next/previous resource                          |
-| `:`               | Command bar: `containers`, `images`, `volumes`, `projects` (`co`, `im`, `vol`, `pr`) |
+| `:`               | Command bar: `containers`, `images`, `volumes`, `projects`, `networks` (`co`, `im`, `vol`, `pr`, `net`) |
 | `/`               | Filter the list (case-insensitive); Esc clears it             |
 | `j`/`k`, arrows   | Move the selection; `g`/`G` jump to the first/last row        |
 | `Esc`             | Clear the filter, otherwise go back to the previous view      |
@@ -281,9 +307,10 @@ Global keys and list navigation:
 Actions in the resource views. Delete and prune ask for confirmation first.
 Container prune removes only the stopped (exited, created or dead) containers
 in the view's scope: every container in the root view, or only the containers
-using that image or volume, or belonging to that project, in a drill-down,
-including ones hidden by `a` or a `/` filter. Running, paused and restarting
-containers are never removed, and the pruned containers' volumes are kept:
+using that image, volume or network, or belonging to that project, in a
+drill-down, including ones hidden by `a` or a `/` filter. Running, paused and
+restarting containers are never removed, and the pruned containers' volumes
+are kept:
 
 | View       | Keys                                                               |
 |------------|--------------------------------------------------------------------|
@@ -291,6 +318,7 @@ containers are never removed, and the pruned containers' volumes are kept:
 | Images     | `Enter` containers using it, `p` pull, `d` delete, `i` inspect, `P` prune dangling, `a` all/tagged |
 | Volumes    | `Enter` containers using it, `c` create, `d` delete, `i` inspect, `P` prune unused |
 | Projects   | `Enter` containers, `s` start/stop, `r` restart                    |
+| Networks   | `Enter` containers attached to it, `i` inspect, `d` delete (not on built-in networks), `P` prune unused |
 | Logs       | `G` follow, `/` search, `r` reopen an ended stream                 |
 
 Flags:
