@@ -34,9 +34,9 @@
 
 ## 6. Integration checks
 
-- [ ] 6.1 Add an integration test (build tag `integration`) that creates labeled containers in a test Compose-like project on a real engine, then checks the projects view row, stop and start of the project, and cleanup of the labeled resources; verify `go test -tags integration ./...` passes
-- [ ] 6.2 Run the full local check (`go build ./...`, `gofmt -l .`, `go vet ./...`, `golangci-lint run ./...` and with `--build-tags integration`, `go test -race ./...`) and verify all pass
-- [ ] 6.3 Run `openspec validate add-compose-projects --strict` and verify it passes
+- [x] 6.1 Add an integration test (build tag `integration`) that creates labeled containers in a test Compose-like project on a real engine, then checks the projects view row, stop and start of the project, and cleanup of the labeled resources; verify `go test -tags integration ./...` passes
+- [x] 6.2 Run the full local check (`go build ./...`, `gofmt -l .`, `go vet ./...`, `golangci-lint run ./...` and with `--build-tags integration`, `go test -race ./...`) and verify all pass
+- [x] 6.3 Run `openspec validate add-compose-projects --strict` and verify it passes
 
 ## Workflow follow-up
 
