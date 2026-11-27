@@ -85,6 +85,36 @@ func TestContainersKeysDistinct(t *testing.T) {
 	}
 }
 
+// TestProjectsKeysDistinct fails if two bindings the projects view answers
+// to share a key, and checks the keys of its project actions, which match
+// the single-container s and r.
+func TestProjectsKeysDistinct(t *testing.T) {
+	bs := slices.Concat(Projects.Bindings(), Table.Bindings(),
+		[]key.Binding{Global.Command, Global.Help, Global.Back, Global.Quit, Global.ForceQuit},
+		Global.TabKeys(), []key.Binding{Global.NextTab, Global.PrevTab})
+	owner := map[string]string{}
+	for _, b := range bs {
+		for _, k := range b.Keys() {
+			if prev, ok := owner[k]; ok {
+				t.Errorf("key %q is bound by both %q and %q", k, prev, b.Help().Desc)
+				continue
+			}
+			owner[k] = b.Help().Desc
+		}
+	}
+	for name, want := range map[string]struct {
+		b   key.Binding
+		key string
+	}{
+		"StartStop": {Projects.StartStop, Containers.StartStop.Help().Key},
+		"Restart":   {Projects.Restart, Containers.Restart.Help().Key},
+	} {
+		if !slices.Equal(want.b.Keys(), []string{want.key}) || want.b.Help().Key != want.key {
+			t.Errorf("%s binding = keys %q help %q, want %s", name, want.b.Keys(), want.b.Help().Key, want.key)
+		}
+	}
+}
+
 // TestContainersBindingsListPauseAndPrune fails if p or P is bound but left
 // out of Bindings, which would hide it from the footer and help.
 func TestContainersBindingsListPauseAndPrune(t *testing.T) {
