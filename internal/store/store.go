@@ -458,7 +458,8 @@ func (s *Store) loadAll(ctx context.Context) (Snapshot, error) {
 }
 
 // reload returns a copy of base with kind k re-listed from the engine (and
-// the usage indexes recomputed if k is containers). base is not modified.
+// the usage and project indexes recomputed if k is containers). base is not
+// modified.
 func (s *Store) reload(ctx context.Context, base Snapshot, k kind) (Snapshot, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.callTimeout)
 	defer cancel()
@@ -469,6 +470,7 @@ func (s *Store) reload(ctx context.Context, base Snapshot, k kind) (Snapshot, er
 		if cs, err = s.svc.ContainerList(ctx, docker.ContainerListOptions{All: true}); err == nil {
 			base.containers = cs
 			base.imageUsers, base.volumeUsers = buildIndexes(cs)
+			base.projects, base.projectNames = buildProjects(cs)
 		}
 	case kindImages:
 		var imgs []image.Summary

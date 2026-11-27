@@ -762,3 +762,45 @@ func TestActionWithDetailAndTimeout(t *testing.T) {
 		t.Errorf("timed-out action = %+v", res)
 	}
 }
+
+// --- Compose projects through the store --------------------------------
+
+func TestSnapshotProjectsFromFake(t *testing.T) {
+	t.Parallel()
+	f := dockerfake.New()
+	add := func(name, project string, state container.ContainerState, oneoff bool) string {
+		return f.AddContainer(container.Summary{
+			Names: []string{"/" + name}, State: state,
+			Labels: dockerfake.Compose{Project: project, Service: "svc", OneOff: oneoff, WorkingDir: "/srv/" + project}.Labels(),
+		})
+	}
+	add("myapp-web-1", "myapp", container.StateRunning, false)
+	add("myapp-db-1", "myapp", container.StateExited, false)
+	add("myapp-run-1", "myapp", container.StateRunning, true)
+	f.AddContainer(ctr("", "redis", "", container.StateRunning))
+	_, rec := start(t, f, testConfig())
+
+	snap := rec.snapshot(t, "initial", nil)
+	ps := snap.Projects()
+	if snap.NumProjects() != 1 || len(ps) != 1 {
+		t.Fatalf("projects = %v, want [myapp]", projectNames(ps))
+	}
+	p := ps[0]
+	if p.Name != "myapp" || p.Running != 1 || p.Total() != 2 || p.State != ProjectPartial ||
+		len(p.OneOffs) != 1 || p.WorkingDir != "/srv/myapp" {
+		t.Errorf("myapp = %+v, want 1/2 partial with one one-off in /srv/myapp", p)
+	}
+
+	// A new project appears with its first container ...
+	blog := add("blog-web-1", "blog", container.StateExited, false)
+	snap = rec.snapshot(t, "blog created", func(s Snapshot) bool { return s.NumProjects() == 2 })
+	if got := projectNames(snap.Projects()); !slices.Equal(got, []string{"blog", "myapp"}) {
+		t.Errorf("projects = %v, want [blog myapp]", got)
+	}
+	// ... and disappears with its last one.
+	f.RemoveContainer(blog)
+	snap = rec.snapshot(t, "blog removed", func(s Snapshot) bool { return s.NumProjects() == 1 })
+	if got := projectNames(snap.Projects()); !slices.Equal(got, []string{"myapp"}) {
+		t.Errorf("projects = %v, want [myapp]", got)
+	}
+}

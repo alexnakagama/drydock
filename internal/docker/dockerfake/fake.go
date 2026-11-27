@@ -106,6 +106,47 @@ const clientAPIVersion = "1.57"
 // without a name; ContainerRemove with RemoveVolumes removes them.
 const AnonymousVolumeLabel = "com.docker.volume.anonymous"
 
+// Labels Docker Compose sets on the containers it creates. They match the
+// constants of the same purpose in internal/store, which this package
+// cannot import.
+const (
+	ComposeProjectLabel    = "com.docker.compose.project"
+	ComposeServiceLabel    = "com.docker.compose.service"
+	ComposeOneoffLabel     = "com.docker.compose.oneoff"
+	ComposeWorkingDirLabel = "com.docker.compose.project.working_dir"
+)
+
+// Compose describes the Compose labels of a container, for AddContainer:
+//
+//	f.AddContainer(container.Summary{
+//		Names:  []string{"/myapp-web-1"},
+//		State:  container.StateRunning,
+//		Labels: dockerfake.Compose{Project: "myapp", Service: "web"}.Labels(),
+//	})
+type Compose struct {
+	Project    string
+	Service    string
+	WorkingDir string // omitted from the labels when empty
+	OneOff     bool   // created by `docker compose run`
+}
+
+// Labels returns the labels Compose would set, as a new map. Like Compose,
+// it always sets the one-off label, to "True" or "False".
+func (c Compose) Labels() map[string]string {
+	l := map[string]string{
+		ComposeProjectLabel: c.Project,
+		ComposeServiceLabel: c.Service,
+		ComposeOneoffLabel:  "False",
+	}
+	if c.OneOff {
+		l[ComposeOneoffLabel] = "True"
+	}
+	if c.WorkingDir != "" {
+		l[ComposeWorkingDirLabel] = c.WorkingDir
+	}
+	return l
+}
+
 // Service is an in-memory docker.Service. The zero value is not usable;
 // create one with New.
 type Service struct {
@@ -131,6 +172,7 @@ type Service struct {
 
 	errs     map[Method]error
 	errsOnce map[Method][]error
+	errsFor  map[failKey]error
 	calls    []Call
 	subs     map[*subscription]struct{}
 	nextID   uint64
@@ -163,6 +205,7 @@ func New() *Service {
 		statsOpen:     map[*statsStream]struct{}{},
 		errs:          map[Method]error{},
 		errsOnce:      map[Method][]error{},
+		errsFor:       map[failKey]error{},
 		subs:          map[*subscription]struct{}{},
 	}
 }
@@ -211,6 +254,31 @@ func (s *Service) FailNext(m Method, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.errsOnce[m] = append(s.errsOnce[m], err)
+}
+
+// FailFor makes every call to m whose target is id fail with err, until it
+// is cleared with a nil err; calls to m for other targets are unaffected.
+// Unlike SetError and FailNext, it can pick one container among calls made
+// in parallel. The target is the call's first argument (the container ID
+// for container methods) compared exactly as passed, so a container must
+// be referred to the same way, usually by its full ID. Calls are still
+// recorded. A cancelled context, FailNext and a lost connection take
+// precedence over FailFor, and FailFor takes precedence over SetError.
+func (s *Service) FailFor(m Method, id string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := failKey{method: m, target: id}
+	if err == nil {
+		delete(s.errsFor, k)
+		return
+	}
+	s.errsFor[k] = err
+}
+
+// failKey selects the calls FailFor applies to.
+type failKey struct {
+	method Method
+	target string
 }
 
 // Disconnect simulates losing the engine: every open event and stats stream
@@ -301,7 +369,8 @@ func (s *Service) ResetCalls() {
 // emits a container event ("create", or "update" for a replacement). A
 // zero ID gets a generated one, which is returned. Like the engine, names
 // in c.Names should carry a leading "/". Replacing a container with one that
-// is not running ends its stats streams.
+// is not running ends its stats streams. To model a container created by
+// Docker Compose, set c.Labels from Compose.Labels.
 func (s *Service) AddContainer(c container.Summary) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1160,6 +1229,13 @@ func (s *Service) beginLocked(ctx context.Context, m Method, args ...any) error 
 	}
 	if !s.connected {
 		return s.connErr
+	}
+	if len(args) > 0 {
+		if target, ok := args[0].(string); ok {
+			if err, ok := s.errsFor[failKey{method: m, target: target}]; ok {
+				return err
+			}
+		}
 	}
 	return s.errs[m]
 }
