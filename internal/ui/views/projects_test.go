@@ -251,7 +251,7 @@ func TestProjectsBeforeLoad(t *testing.T) {
 func TestProjectsKeyHelp(t *testing.T) {
 	e := projectsEnv(t, projectSample(), 200, 14)
 	e.selectProject("myapp")
-	if got := e.footer(); !strings.HasPrefix(got, " enter containers  / filter") {
+	if got := e.footer(); !strings.HasPrefix(got, " enter containers  s stop  r restart  / filter") {
 		t.Errorf("footer %q", got)
 	}
 	e.press("/")

@@ -312,6 +312,7 @@ func TestKeyHelpLeavesKeymapsUntouched(t *testing.T) {
 	wantContainers := helpEntries(keys.Containers.Bindings())
 	wantImages := helpEntries(keys.Images.Bindings())
 	wantVolumes := helpEntries(keys.Volumes.Bindings())
+	wantProjects := helpEntries(keys.Projects.Bindings())
 
 	// Exercise every disabling and relabelling path.
 	f, _ := sample()
@@ -328,6 +329,12 @@ func TestKeyHelpLeavesKeymapsUntouched(t *testing.T) {
 	ve.selectVolume("tmp1")
 	ve.volumesView().KeyHelp()
 	volumesEnv(t, dockerfake.New(), 100, 8).volumesView().KeyHelp()
+	pe := projectsEnv(t, projectSample(), 100, 12)
+	for _, name := range []string{"myapp", "blog", "shop", "tools"} {
+		pe.selectProject(name)
+		pe.projectsView().KeyHelp()
+	}
+	projectsEnv(t, dockerfake.New(), 100, 8).projectsView().KeyHelp()
 
 	for _, c := range []struct {
 		name      string
@@ -336,6 +343,7 @@ func TestKeyHelpLeavesKeymapsUntouched(t *testing.T) {
 		{"keys.Containers", helpEntries(keys.Containers.Bindings()), wantContainers},
 		{"keys.Images", helpEntries(keys.Images.Bindings()), wantImages},
 		{"keys.Volumes", helpEntries(keys.Volumes.Bindings()), wantVolumes},
+		{"keys.Projects", helpEntries(keys.Projects.Bindings()), wantProjects},
 		{"keys.Table.Filter", helpEntries([]key.Binding{keys.Table.Filter}), []string{"/ filter"}},
 	} {
 		if !slices.Equal(c.got, c.want) {
@@ -363,6 +371,8 @@ func TestKeyHelpLeavesKeymapsUntouched(t *testing.T) {
 		{keys.Containers.Logs, []string{"l"}},
 		{keys.Images.Containers, []string{"enter"}},
 		{keys.Volumes.Containers, []string{"enter"}},
+		{keys.Projects.StartStop, []string{"s"}},
+		{keys.Projects.Restart, []string{"r"}},
 	} {
 		if !slices.Equal(c.b.Keys(), c.want) {
 			t.Errorf("binding %q keys = %q, want %q", c.b.Help().Key, c.b.Keys(), c.want)
@@ -389,5 +399,73 @@ func TestListViewsReportPosition(t *testing.T) {
 	e.press("enter")
 	if s, l, tot, filt := p.Position(); s != 1 || l != 1 || tot != 3 || !filt {
 		t.Errorf("filtered Position = %d,%d,%d,%v, want 1,1,3,true", s, l, tot, filt)
+	}
+}
+
+func TestProjectsKeyHelpByState(t *testing.T) {
+	f := dockerfake.New()
+	add := func(n int, project string, state container.ContainerState, oneOff bool) {
+		f.AddContainer(composeCtr(n, project+"-"+cid(n)[:1], "alpine", state, string(state),
+			dockerfake.Compose{Project: project, Service: "svc", OneOff: oneOff}))
+	}
+	add(0, "up", container.StateRunning, false)
+	add(1, "half", container.StateRunning, false)
+	add(2, "half", container.StatePaused, false)
+	add(3, "down", container.StateExited, false)
+	add(4, "down", container.StateCreated, false)
+	add(5, "frozen", container.StatePaused, false)
+	add(6, "booting", container.StateRestarting, false)
+	add(7, "tools", container.StateRunning, true)
+	add(8, "pausedrun", container.StatePaused, false)
+	add(9, "pausedrun", container.StateExited, false)
+	e := projectsEnv(t, f, 100, 16)
+	v := e.projectsView()
+
+	for _, tt := range []struct {
+		project string
+		want    []string
+	}{
+		{"up", []string{"enter containers", "s stop", "r restart", "/ filter"}},
+		// A running container wins over a paused one.
+		{"half", []string{"enter containers", "s stop", "r restart", "/ filter"}},
+		{"down", []string{"enter containers", "s start", "r restart", "/ filter"}},
+		// An exited container is started even beside a paused one.
+		{"pausedrun", []string{"enter containers", "s start", "r restart", "/ filter"}},
+		// Nothing to start or stop, and nothing to restart.
+		{"frozen", []string{"enter containers", "-s start/stop", "-r restart", "/ filter"}},
+		// A restarting container is neither stopped nor started, but is
+		// restarted.
+		{"booting", []string{"enter containers", "-s start/stop", "r restart", "/ filter"}},
+		// One-off containers are never acted on.
+		{"tools", []string{"enter containers", "-s start/stop", "-r restart", "/ filter"}},
+	} {
+		e.selectProject(tt.project)
+		checkHelp(t, tt.project, v.KeyHelp(), tt.want)
+	}
+
+	// No project selected: every row action is omitted.
+	e.press("/")
+	e.typeText("zzz")
+	e.press("enter")
+	checkHelp(t, "no selection", v.KeyHelp(),
+		[]string{"-enter containers", "-s start/stop", "-r restart", "/ filter"})
+	if got := e.footer(); strings.Contains(got, "enter") || strings.Contains(got, " s ") || strings.Contains(got, " r ") {
+		t.Errorf("footer %q lists row actions with no project selected", got)
+	}
+}
+
+func TestProjectsFooterHints(t *testing.T) {
+	f := projectSample()
+	e := projectsEnv(t, f, 200, 14)
+	for project, want := range map[string]string{
+		"myapp": " enter containers  s stop  r restart  / filter",
+		"blog":  " enter containers  s start  r restart  / filter",
+		"shop":  " enter containers  / filter", // only a paused service
+		"tools": " enter containers  / filter", // only a one-off container
+	} {
+		e.selectProject(project)
+		if got := e.footer(); !strings.HasPrefix(got, want+"  :") {
+			t.Errorf("%s: footer %q, want prefix %q", project, got, want)
+		}
 	}
 }

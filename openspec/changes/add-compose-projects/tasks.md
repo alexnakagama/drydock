@@ -22,9 +22,9 @@
 
 ## 4. Project actions
 
-- [ ] 4.1 Add the bounded parallel runner (at most 8 at a time, every target attempted, outcome summarized as succeeded/failed with up to three failed names and the first error in name order, interrupted ones as not attempted) and `projectActionTimeout` (10 minutes); verify with unit tests using a fake action that fails some targets, a cancelled context and an expired timeout
-- [ ] 4.2 Implement `s` (stop running service containers, or start created/exited ones, otherwise report start/stop unavailable) and `r` (restart service containers that are not paused, otherwise report restart unavailable); one-off and paused containers are never targeted; verify with `dockerfake` tests for each spec scenario, using the task 1.5 hook for a refused stop of `myapp-db-1` reported with the engine's error text
-- [ ] 4.3 Implement the footer hints for the projects view (`enter containers`, `s stop`/`s start`/omitted, `r restart` omitted without a service container that is not paused, all omitted with no selection); verify with `keyhelp_test.go` cases
+- [x] 4.1 Add the bounded parallel runner (at most 8 at a time, every target attempted, outcome summarized as succeeded/failed with up to three failed names and the first error in name order, interrupted ones as not attempted) and `projectActionTimeout` (10 minutes); verify with unit tests using a fake action that fails some targets, a cancelled context and an expired timeout
+- [x] 4.2 Implement `s` (stop running service containers, or start created/exited ones, otherwise report start/stop unavailable) and `r` (restart service containers that are not paused, otherwise report restart unavailable); one-off and paused containers are never targeted; verify with `dockerfake` tests for each spec scenario, using the task 1.5 hook for a refused stop of `myapp-db-1` reported with the engine's error text
+- [x] 4.3 Implement the footer hints for the projects view (`enter containers`, `s stop`/`s start`/omitted, `r restart` omitted without a service container that is not paused, all omitted with no selection); verify with `keyhelp_test.go` cases
 
 ## 5. Compose column in containers views
 

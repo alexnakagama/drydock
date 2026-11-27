@@ -7,4 +7,4 @@
   tools                 0/0      ○ exited   -                                                       
                                                                                                     
                                                                                                     
- enter containers  / filter  : command  ? help  q quit                                              
+ enter containers  s start  r restart  / filter  : command  ? help  q quit                          

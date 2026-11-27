@@ -1,6 +1,8 @@
 package views
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/moby/moby/api/types/container"
 
+	"github.com/alexnakagama/drydock/internal/docker"
 	"github.com/alexnakagama/drydock/internal/store"
 	"github.com/alexnakagama/drydock/internal/ui"
 	"github.com/alexnakagama/drydock/internal/ui/components"
@@ -102,15 +105,32 @@ func (v *projectsView) Indicators() []string {
 }
 
 // KeyHelp returns the view's bindings in priority order, as copies: the
-// row actions are disabled when no row is selected. Key presses are still
-// matched against keys.Projects, so a disabled hint never disables its key.
+// row actions are disabled when no row is selected, s is labeled by what it
+// would do to the selected project (stop or start) and disabled when it
+// would do neither, and r is disabled when the project has nothing to
+// restart. Key presses are still matched against keys.Projects, so a
+// disabled hint never disables its key: pressing it explains why it is
+// unavailable.
 func (v *projectsView) KeyHelp() []key.Binding {
 	km := keys.Projects
-	ctrs := km.Containers
-	if _, ok := v.selected(); !ok {
-		disable(&ctrs)
+	ctrs, startStop, restart := km.Containers, km.StartStop, km.Restart
+	p, ok := v.selected()
+	if !ok {
+		disable(&ctrs, &startStop, &restart)
+	} else {
+		switch {
+		case len(stopTargets(p)) > 0:
+			startStop.SetHelp(km.StartStop.Help().Key, "stop")
+		case len(startTargets(p)) > 0:
+			startStop.SetHelp(km.StartStop.Help().Key, "start")
+		default:
+			disable(&startStop)
+		}
+		if len(restartTargets(p)) == 0 {
+			disable(&restart)
+		}
 	}
-	return []key.Binding{ctrs, keys.Table.Filter}
+	return []key.Binding{ctrs, startStop, restart, keys.Table.Filter}
 }
 
 // Position reports the table's selection and row counts (ui.Positioner).
@@ -153,12 +173,24 @@ func (v *projectsView) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if ok, cmd := v.table.Update(msg); ok {
 		return cmd
 	}
+	km := keys.Projects
 	p, ok := v.selected()
 	if !ok {
+		switch {
+		case key.Matches(msg, km.StartStop):
+			return ui.Error("start/stop is unavailable: no project selected")
+		case key.Matches(msg, km.Restart):
+			return ui.Error("restart is unavailable: no project selected")
+		}
 		return nil
 	}
-	if key.Matches(msg, keys.Projects.Containers) {
+	switch {
+	case key.Matches(msg, km.Containers):
 		return v.showContainers(p.Name)
+	case key.Matches(msg, km.StartStop):
+		return v.startStop(p)
+	case key.Matches(msg, km.Restart):
+		return v.restart(p)
 	}
 	return nil
 }
@@ -259,4 +291,95 @@ func (v *projectsView) showContainers(name string) tea.Cmd {
 // name, which is never empty.
 func inProject(c container.Summary, name string) bool {
 	return name != "" && c.Labels[store.ComposeProjectLabel] == name
+}
+
+// stopTargets returns the containers s stops: the project's running
+// service containers. Paused and restarting ones are left alone, as the
+// single-container s leaves them, and one-off containers are never acted
+// on.
+func stopTargets(p store.Project) []container.Summary {
+	return serviceContainers(p, func(s container.ContainerState) bool { return s == container.StateRunning })
+}
+
+// startTargets returns the containers s starts when none is running: the
+// project's created and exited service containers. Nothing is created, so
+// a service whose container was removed stays absent.
+func startTargets(p store.Project) []container.Summary {
+	return serviceContainers(p, func(s container.ContainerState) bool {
+		return s == container.StateCreated || s == container.StateExited
+	})
+}
+
+// restartTargets returns the containers r restarts: every service
+// container of the project that is not paused, whatever its other state.
+// A paused container cannot act on SIGTERM, so restarting it would wait
+// out its whole stop timeout while holding a slot of the parallel runner.
+func restartTargets(p store.Project) []container.Summary {
+	return serviceContainers(p, func(s container.ContainerState) bool { return s != container.StatePaused })
+}
+
+// serviceContainers returns p's service containers whose state satisfies
+// keep, in p's order (name then ID).
+func serviceContainers(p store.Project, keep func(container.ContainerState) bool) []container.Summary {
+	var out []container.Summary
+	for _, c := range p.Services {
+		if keep(c.State) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// startStop stops the selected project's running service containers or,
+// when none is running, starts its created and exited ones. Otherwise
+// nothing is sent to the engine.
+func (v *projectsView) startStop(p store.Project) tea.Cmd {
+	name := docker.SanitizeText(p.Name)
+	if ts := stopTargets(p); len(ts) > 0 {
+		return v.act(name, "stop", "stopping", "stopped", ts, docker.Service.ContainerStop)
+	}
+	if ts := startTargets(p); len(ts) > 0 {
+		return v.act(name, "start", "starting", "started", ts, docker.Service.ContainerStart)
+	}
+	if len(p.Services) == 0 {
+		return ui.Error(fmt.Sprintf("start/stop is unavailable for project %s: it has no service container", name))
+	}
+	return ui.Error(fmt.Sprintf("start/stop is unavailable for project %s: no service container is running, created or exited", name))
+}
+
+// restart restarts the selected project's service containers that are not
+// paused. Otherwise nothing is sent to the engine.
+func (v *projectsView) restart(p store.Project) tea.Cmd {
+	name := docker.SanitizeText(p.Name)
+	if ts := restartTargets(p); len(ts) > 0 {
+		return v.act(name, "restart", "restarting", "restarted", ts, docker.Service.ContainerRestart)
+	}
+	if len(p.Services) == 0 {
+		return ui.Error(fmt.Sprintf("restart is unavailable for project %s: it has no service container", name))
+	}
+	return ui.Error(fmt.Sprintf("restart is unavailable for project %s: every service container is paused", name))
+}
+
+// act runs call on every target in parallel, without confirmation, bounded
+// by projectActionTimeout, and reports the outcome naming the project (see
+// parallelAction.run). The targets were chosen from the view's snapshot;
+// they are acted on by ID, so a container that changed state meanwhile is
+// handled by the engine (a stop of a stopped container does nothing) and a
+// removed one is reported as failed.
+func (v *projectsView) act(project, verb, gerund, past string, targets []container.Summary,
+	call func(docker.Service, context.Context, string) error) tea.Cmd {
+	return ui.Track(gerund+" "+project, v.st.ActionWith(verb+" "+project, projectActionTimeout,
+		func(ctx context.Context, svc docker.Service) (string, error) {
+			n, err := parallelAction[container.Summary]{
+				name: store.ContainerName,
+				act: func(ctx context.Context, c container.Summary) error {
+					return call(svc, ctx, c.ID)
+				},
+				verb: past,
+			}.run(ctx, targets)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("%s %s of %s", past, plural(n, "container", "containers"), project), nil
+		}))
 }

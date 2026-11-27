@@ -255,14 +255,22 @@ func (m VolumesMap) Bindings() []key.Binding {
 type ProjectsMap struct {
 	// Containers opens the containers of the selected project.
 	Containers key.Binding
+	// StartStop stops the project's running service containers, or starts
+	// its created and exited ones when none is running.
+	StartStop key.Binding
+	// Restart restarts the project's service containers that are not
+	// paused.
+	Restart key.Binding
 }
 
 // Projects is the projects-view keymap.
 var Projects = ProjectsMap{
 	Containers: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "containers")),
+	StartStop:  key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "start/stop")),
+	Restart:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "restart")),
 }
 
 // Bindings returns the projects-view bindings in display order.
 func (m ProjectsMap) Bindings() []key.Binding {
-	return []key.Binding{m.Containers}
+	return []key.Binding{m.Containers, m.StartStop, m.Restart}
 }
