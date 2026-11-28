@@ -12,6 +12,7 @@ import (
 
 	"github.com/alexnakagama/drydock/internal/docker"
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
+	"github.com/alexnakagama/drydock/internal/ui/components"
 )
 
 func TestLineRing(t *testing.T) {
@@ -68,6 +69,9 @@ func TestCleanLogLine(t *testing.T) {
 		"tab\tsep":                      "tab sep",
 		"bidi \u202eevil":               "bidi \ufffdevil",
 		"crlf\r":                        "crlf",
+		"bad \xc3\x1b[31mred":           "bad \ufffdred",
+		"raw c1 \x9b31m":                "raw c1 \ufffd31m",
+		"bytes \xff\xfe":                "bytes \ufffd",
 	}
 	for in, want := range tests {
 		if got := cleanLogLine([]byte(in)); got != want {
@@ -542,4 +546,80 @@ func TestLineWriterDoesNotSplitEscapes(t *testing.T) {
 	if want := []string{strings.Repeat("a", 97), "red"}; !slices.Equal(got, want) {
 		t.Errorf("lines = %q, want %q", got, want)
 	}
+}
+
+// styled renders text as one span of kind k, as the logs view does.
+func styled(text string, k components.SpanKind) string {
+	return components.RenderSpans(text, []components.Span{{Start: 0, End: len(text), Kind: k}})
+}
+
+// matchOpen returns the escape sequence that starts a search match. It is
+// the only style with a background, so it appears nowhere else.
+func matchOpen(t *testing.T) string {
+	t.Helper()
+	open, _, ok := strings.Cut(styled("x", components.KindMatch), "x")
+	if !ok || open == "" {
+		t.Fatal("search matches are not styled")
+	}
+	return open
+}
+
+func TestLogsColorsTimestampLevelAndMatches(t *testing.T) {
+	f := dockerfake.New()
+	id := f.AddContainer(ctr(cid(0), "web", "nginx", container.StateRunning, "Up"))
+	f.WriteLog(id, false, "2026-11-28T10:15:02Z ERROR disk full\n")
+	f.WriteLog(id, false, "level=warn msg=slow\n")
+	f.WriteLog(id, false, "done\n")
+	e := newEnv(t, f, 80, 12)
+	e.openLogs()
+	e.until("backlog", func() bool { return e.lastContentLine() == "done" })
+
+	s := components.Styles
+	raw := e.m.View().Content
+	for name, want := range map[string]string{
+		"timestamp dimmed": s.LogTime.Render("2026-11-28T10:15:02Z") + " " + s.LogError.Render("ERROR") + " disk full",
+		"structured level": "level=" + s.LogWarn.Render("warn") + " msg=slow",
+	} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("%s: %q not in\n%q", name, want, raw)
+		}
+	}
+	if strings.Contains(raw, matchOpen(t)) {
+		t.Errorf("match styling without a search:\n%q", raw)
+	}
+
+	// A match inside the level takes the match style; the rest of the
+	// level keeps the level color.
+	e.press("/")
+	e.typeText("rro")
+	e.press("enter")
+	e.until("search applied", func() bool { return strings.Contains(e.header(), "[/rro]") })
+	raw = e.m.View().Content
+	want := s.LogTime.Render("2026-11-28T10:15:02Z") + " " +
+		s.LogError.Render("E") + styled("RRO", components.KindMatch) + s.LogError.Render("R") + " disk full"
+	if !strings.Contains(raw, want) {
+		t.Errorf("match over the level: %q not in\n%q", want, raw)
+	}
+
+	// Esc clears the search and its highlight.
+	e.press("esc")
+	e.until("search cleared", func() bool { return !strings.Contains(e.header(), "/rro") })
+	if raw := e.m.View().Content; strings.Contains(raw, matchOpen(t)) {
+		t.Errorf("match styling left after Esc:\n%q", raw)
+	}
+}
+
+func TestLogsHighlightsWhileTyping(t *testing.T) {
+	f := dockerfake.New()
+	id := f.AddContainer(ctr(cid(0), "web", "nginx", container.StateRunning, "Up"))
+	f.WriteLog(id, false, "ERR: retry after err\n")
+	e := newEnv(t, f, 80, 12)
+	e.openLogs()
+	e.until("backlog", func() bool { return e.lastContentLine() == "ERR: retry after err" })
+
+	e.press("/")
+	e.typeText("err")
+	m := components.KindMatch
+	want := styled("ERR", m) + ": retry after " + styled("err", m)
+	e.until("both occurrences highlighted", func() bool { return strings.Contains(e.m.View().Content, want) })
 }
