@@ -25,9 +25,9 @@
 
 ## 5. Integration checks
 
-- [ ] 5.1 Run `go vet ./...` and `go test ./...` (including the integration tests in the environment CI uses) and verify everything passes.
-- [ ] 5.2 Run drydock against a real engine with a few containers, one of them busy (for example `docker run -d --name burn busybox sh -c 'while :; do :; done'`): press `o` and confirm stats turn on and `burn` moves to the top, `o` again sorts by MEM, `o` again returns to name order with stats on, `t` while sorted resets to name, the selection follows a moving row, and the header and footer labels match the spec.
-- [ ] 5.3 Run `openspec validate add-container-stats-sorting --strict` and verify it passes.
+- [x] 5.1 Run `go vet ./...` and `go test ./...` (including the integration tests in the environment CI uses) and verify everything passes.
+- [x] 5.2 Run drydock against a real engine with a few containers, one of them busy (for example `docker run -d --name burn busybox sh -c 'while :; do :; done'`): press `o` and confirm stats turn on and `burn` moves to the top, `o` again sorts by MEM, `o` again returns to name order with stats on, `t` while sorted resets to name, the selection follows a moving row, and the header and footer labels match the spec.
+- [x] 5.3 Run `openspec validate add-container-stats-sorting --strict` and verify it passes.
 
 ## Workflow follow-up
 
