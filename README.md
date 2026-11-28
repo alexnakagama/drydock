@@ -26,7 +26,7 @@ the binary. Set `VERSION` to the release you want (without the leading `v`),
 and `OS`/`ARCH` to your platform:
 
 ```sh
-VERSION=0.7.0
+VERSION=0.8.0
 OS=linux      # linux or darwin
 ARCH=amd64    # amd64 or arm64
 archive="drydock_${VERSION}_${OS}_${ARCH}.tar.gz"
