@@ -596,9 +596,7 @@ func (v *containersView) refresh() {
 		}
 		list = append(list, c)
 	}
-	slices.SortFunc(list, func(a, b container.Summary) int {
-		return cmp.Or(cmp.Compare(store.ContainerName(a), store.ContainerName(b)), cmp.Compare(a.ID, b.ID))
-	})
+	slices.SortFunc(list, compareByName)
 
 	// The Compose column follows the whole snapshot, not the listed rows,
 	// so neither the `a` mode nor the filter makes the layout jump.
@@ -655,13 +653,7 @@ func (v *containersView) setRows() {
 // for every container while the engine is not connected.
 func (v *containersView) statsCells(c container.Summary) (cpu, mem string) {
 	cpu, mem = noStats, noStats
-	if c.State != container.StateRunning || v.conn != store.StateConnected {
-		return cpu, mem
-	}
-	s, ok := v.stats[c.ID]
-	if !ok {
-		return cpu, mem
-	}
+	s := shownStats(c, v.conn, v.stats)
 	if s.HasCPU {
 		cpu = formatCPU(s.CPUPercent)
 	}
@@ -671,9 +663,93 @@ func (v *containersView) statsCells(c container.Summary) (cpu, mem string) {
 	return cpu, mem
 }
 
+// shownStats returns the stats values c's cells show, given the connection
+// state and the latest stats batch: c's sample from stats while c is
+// running and the engine is connected, and the zero value (HasCPU and
+// HasMem false) otherwise. HasCPU and HasMem in the result are exactly
+// whether the CPU and MEM cells show a value rather than noStats, so the
+// cells and the sort order cannot disagree.
+func shownStats(c container.Summary, conn store.State, stats map[string]store.ContainerStats) store.ContainerStats {
+	if c.State != container.StateRunning || conn != store.StateConnected {
+		return store.ContainerStats{}
+	}
+	return stats[c.ID]
+}
+
+// compareByName orders containers by name, then by ID. Names are unique
+// among an engine's containers, but the ID keeps the order total.
+func compareByName(a, b container.Summary) int {
+	return cmp.Or(cmp.Compare(store.ContainerName(a), store.ContainerName(b)), cmp.Compare(a.ID, b.ID))
+}
+
+// containerOrder returns the comparator for order, for use with
+// slices.SortFunc, given the connection state and the latest stats batch.
+//
+// sortName is compareByName. sortCPU and sortMem put the rows whose sorted
+// cell shows a value (see shownStats) first, largest value first, and the
+// rows showing noStats after them; rows that compare equal on that are in
+// name order. CPU compares the value the cell shows, rounded to one decimal
+// as formatCPU rounds it, so values that look the same (0.04% and 0.0%)
+// compare equal and idle containers keep their name order. MEM compares the
+// usage in bytes. An unknown order sorts by name.
+func containerOrder(order sortOrder, conn store.State, stats map[string]store.ContainerStats) func(a, b container.Summary) int {
+	switch order {
+	case sortCPU:
+		return byStat(conn, stats, func(s store.ContainerStats) (float64, bool) {
+			return shownCPU(s.CPUPercent), s.HasCPU
+		})
+	case sortMem:
+		return byStat(conn, stats, func(s store.ContainerStats) (uint64, bool) {
+			return s.MemUsage, s.HasMem
+		})
+	default:
+		return compareByName
+	}
+}
+
+// byStat returns a comparator that puts the containers whose key reports a
+// value first, largest value first, then the others, each group in name
+// order. cmp.Compare orders a NaN key below every other value, so the
+// order stays total for any float input.
+func byStat[T cmp.Ordered](conn store.State, stats map[string]store.ContainerStats, key func(store.ContainerStats) (T, bool)) func(a, b container.Summary) int {
+	return func(a, b container.Summary) int {
+		av, aok := key(shownStats(a, conn, stats))
+		bv, bok := key(shownStats(b, conn, stats))
+		switch {
+		case aok && !bok:
+			return -1
+		case !aok && bok:
+			return 1
+		case aok && bok:
+			if c := cmp.Compare(bv, av); c != 0 { // descending
+				return c
+			}
+		}
+		return compareByName(a, b)
+	}
+}
+
+// shownCPU returns pct as formatCPU shows it: rounded to one decimal by the
+// same formatting, so a half such as 0.25 compares as the 0.2 the cell
+// shows (math.Round would make it 0.3). Cells with the same text give equal
+// values; the only distinct texts with equal values are "-0.0" and "0.0",
+// which both read as zero.
+func shownCPU(pct float64) float64 {
+	v, err := strconv.ParseFloat(cpuText(pct), 64)
+	if err != nil {
+		// FormatFloat's output always parses (NaN and ±Inf included); keep
+		// the raw value rather than panic if that ever changes.
+		return pct
+	}
+	return v
+}
+
 // formatCPU renders a CPU percentage with one decimal, as `docker stats`
 // does: "100.0%".
-func formatCPU(pct float64) string { return strconv.FormatFloat(pct, 'f', 1, 64) + "%" }
+func formatCPU(pct float64) string { return cpuText(pct) + "%" }
+
+// cpuText is formatCPU's number, without the percent sign.
+func cpuText(pct float64) string { return strconv.FormatFloat(pct, 'f', 1, 64) }
 
 // formatMem renders memory usage and limit in binary units, as `docker
 // stats` does: "512.3MiB / 2GiB".

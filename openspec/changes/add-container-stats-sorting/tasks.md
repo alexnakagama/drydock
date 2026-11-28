@@ -7,8 +7,8 @@
 
 ## 2. Comparator
 
-- [ ] 2.1 Extract the "has a value" test from `statsCells` into a helper used by both `statsCells` and the new comparator, and verify the existing stats tests in `containers_stats_test.go` still pass unchanged.
-- [ ] 2.2 Implement the comparator from design.md (has value first; CPU as the tenths shown in the cell, taken from the same formatting as `formatCPU` and not from `math.Round`, or MEM bytes, descending; then name; then ID) as a plain function, with table-driven unit tests covering: largest first for CPU and MEM, `0.04%` vs `0.0%` comparing equal and falling back to name, a half such as `0.25` ordering the same as the cell text `0.2%`, rows equal in every key staying in a deterministic order (name, then ID), exited/paused/no-sample/`HasMem=false` rows last in name order, and the disconnected state putting every row in name order; verify `go test ./internal/ui/views/ -run Sort` passes.
+- [x] 2.1 Extract the "has a value" test from `statsCells` into a helper used by both `statsCells` and the new comparator, and verify the existing stats tests in `containers_stats_test.go` still pass unchanged.
+- [x] 2.2 Implement the comparator from design.md (has value first; CPU as the tenths shown in the cell, taken from the same formatting as `formatCPU` and not from `math.Round`, or MEM bytes, descending; then name; then ID) as a plain function, with table-driven unit tests covering: largest first for CPU and MEM, `0.04%` vs `0.0%` comparing equal and falling back to name, a half such as `0.25` ordering the same as the cell text `0.2%`, rows equal in every key staying in a deterministic order (name, then ID), exited/paused/no-sample/`HasMem=false` rows last in name order, and the disconnected state putting every row in name order; verify `go test ./internal/ui/views/ -run Sort` passes.
 
 ## 3. View behavior
 
