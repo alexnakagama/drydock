@@ -1735,3 +1735,236 @@ func TestRowSpans(t *testing.T) {
 		})
 	}
 }
+
+// newMeterTable returns a table with a NAME column and a flex MEM meter
+// column of minimum width 19, whose rendered width is width-10 (the gutter,
+// NAME and the gap take the rest), with the first row selected.
+func newMeterTable(width int, rows ...Row) Table {
+	tb := NewTable([]Column{
+		{Title: "NAME", Width: 6, Filter: true},
+		{Title: "MEM", Width: 19, Flex: true, Filter: true, Meter: true},
+	})
+	tb.SetSize(width, 10)
+	tb.SetRows(rows)
+	return tb
+}
+
+func meterRow(key, mem string, level float64) Row {
+	return Row{Key: key, Cells: []string{key, mem}, Meter: level, HasMeter: true}
+}
+
+// memCells returns the stripped MEM cell of every body line, trailing
+// blanks removed.
+func memCells(t *testing.T, tb *Table) []string {
+	t.Helper()
+	lines := strings.Split(ansi.Strip(tb.View()), "\n")[1:]
+	var cells []string
+	for _, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		cells = append(cells, strings.TrimRight(ansi.Cut(l, gutterWidth+6+columnGap, ansi.StringWidth(l)), " "))
+	}
+	return cells
+}
+
+func TestTableMeter(t *testing.T) {
+	rows := []Row{
+		meterRow("db", "999.9MiB / 2GiB", 0.25), // 15 cells, the widest
+		meterRow("redis", "8.1MiB / 1GiB", 1),
+		{Key: "old", Cells: []string{"old", "-"}},
+		meterRow("short", "1B / 1GiB", 0),
+	}
+	for _, tc := range []struct {
+		name  string
+		width int
+		want  []string
+	}{
+		{"ample width draws 10-cell bars", 60, []string{
+			"999.9MiB / 2GiB  ██▌░░░░░░░",
+			"8.1MiB / 1GiB    ██████████",
+			"-",
+			"1B / 1GiB        ░░░░░░░░░░",
+		}},
+		{"5 cells left draws 5-cell bars", 32, []string{
+			"999.9MiB / 2GiB  █▎░░░",
+			"8.1MiB / 1GiB    █████",
+			"-",
+			"1B / 1GiB        ░░░░░",
+		}},
+		{"4 cells left draws no bar", 31, []string{"999.9MiB / 2GiB", "8.1MiB / 1GiB", "-", "1B / 1GiB"}},
+		{"bars in between are as wide as the spare width", 35, []string{
+			"999.9MiB / 2GiB  ██░░░░░░",
+			"8.1MiB / 1GiB    ████████",
+			"-",
+			"1B / 1GiB        ░░░░░░░░",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tb := newMeterTable(tc.width, rows...)
+			if got := memCells(t, &tb); !slices.Equal(got, tc.want) {
+				t.Errorf("MEM cells = %q, want %q", got, tc.want)
+			}
+			for i, l := range strings.Split(tb.View(), "\n") {
+				if w := ansi.StringWidth(l); w != tc.width {
+					t.Errorf("line %d is %d cells wide, want %d", i, w, tc.width)
+				}
+			}
+		})
+	}
+}
+
+// At its minimum width a meter column draws no bar, however much blank the
+// text leaves.
+func TestTableMeterAtMinimumWidth(t *testing.T) {
+	// The widest text is 9 cells, in a 19-cell column.
+	tb := newMeterTable(29, meterRow("a", "52KiB/1Gi", 0.5), meterRow("b", "9KiB / 1G", 0.9))
+	if ws := tb.widths(); ws[1] != 19 {
+		t.Fatalf("MEM is %d cells wide, want its minimum 19", ws[1])
+	}
+	if got, want := memCells(t, &tb), []string{"52KiB/1Gi", "9KiB / 1G"}; !slices.Equal(got, want) {
+		t.Errorf("MEM cells = %q, want %q", got, want)
+	}
+	// One cell wider and the same text has room for a 20-9-2 = 9-cell bar.
+	tb.SetSize(30, 10)
+	if got, want := memCells(t, &tb)[0], "52KiB/1Gi  "+Bar(0.5, 9); got != want {
+		t.Errorf("MEM cell at column width 20 = %q, want %q", got, want)
+	}
+}
+
+func TestTableMeterRowsWithoutMeter(t *testing.T) {
+	plain := []Row{
+		{Key: "a", Cells: []string{"a", "1MiB / 1GiB"}, Tone: ToneGood},
+		{Key: "b", Cells: []string{"b", "-"}, Meter: 0.5}, // Meter without HasMeter
+		{Key: "c", Cells: []string{"c"}, HasMeter: true, Meter: 1},
+	}
+	tb := newMeterTable(60, plain...)
+	// The same rows in a table without a meter column render identically.
+	ref := NewTable([]Column{
+		{Title: "NAME", Width: 6, Filter: true},
+		{Title: "MEM", Width: 19, Flex: true, Filter: true},
+	})
+	ref.SetSize(60, 10)
+	ref.SetRows(plain)
+	if got, want := tb.View(), ref.View(); got != want {
+		t.Errorf("rows without a meter changed:\n%q\nwant\n%q", got, want)
+	}
+	// A row that has no cell in the meter column gets no bar.
+	if strings.Contains(ansi.Strip(tb.View()), barEmpty) || strings.Contains(ansi.Strip(tb.View()), barFull) {
+		t.Error("a bar was drawn for a row without HasMeter or without a MEM cell")
+	}
+}
+
+func TestTableMeterAlignmentFollowsFilter(t *testing.T) {
+	tb := newMeterTable(60,
+		meterRow("db", "999.9MiB / 2GiB", 0.25),
+		meterRow("redis", "8.1MiB / 1GiB", 0.5),
+		meterRow("rabbit", "12MiB / 1GiB", 0.5),
+	)
+	press(t, &tb, "/")
+	typeText(&tb, "r")
+	press(t, &tb, "enter")
+	want := []string{
+		"8.1MiB / 1GiB  █████░░░░░",
+		"12MiB / 1GiB   █████░░░░░",
+	}
+	if got := memCells(t, &tb); !slices.Equal(got, want) {
+		t.Errorf("filtered MEM cells = %q, want %q", got, want)
+	}
+	tb.ClearFilter()
+	if got := memCells(t, &tb); got[1] != "8.1MiB / 1GiB    █████░░░░░" {
+		t.Errorf("unfiltered MEM cell = %q, want the bar after the widest text again", got[1])
+	}
+}
+
+func TestTableMeterToneAndSelection(t *testing.T) {
+	warn := meterRow("api", "800MiB / 1GiB", 0.8)
+	warn.Tone, warn.CellTones = ToneGood, []Tone{ToneDefault, ToneWarn}
+	sel := meterRow("db", "999.9MiB / 2GiB", 0.95)
+	sel.Tone, sel.CellTones = ToneGood, []Tone{ToneDefault, ToneBad}
+	tb := newMeterTable(60, sel, warn)
+	lines := strings.Split(tb.View(), "\n")
+
+	// The bar is part of the cell, so it is drawn in the cell's tone.
+	cell := Fit("800MiB / 1GiB", 15) + "  " + Bar(0.8, 10)
+	if !strings.Contains(lines[2], Styles.RowWarn.Render(Fit(cell, 50))) {
+		t.Errorf("warn row %q does not draw its text and bar in the warning color", lines[2])
+	}
+	// The selected row shows its bar, in the selection style alone.
+	if !strings.Contains(ansi.Strip(lines[1]), Bar(0.95, 10)) {
+		t.Errorf("selected row %q has no bar", ansi.Strip(lines[1]))
+	}
+	plain, _ := tb.renderLine(tb.meterCells(sel, tb.meterWidths(tb.widths())), tb.widths())
+	if want := Styles.SelectionMarker.Render(selectionMarker) + Styles.TableSelected.Render(" "+plain); lines[1] != want {
+		t.Errorf("selected row rendered %q, want %q", lines[1], want)
+	}
+	badOpen, _, _ := strings.Cut(Styles.RowBad.Render("x"), "x")
+	if strings.Contains(lines[1], badOpen) {
+		t.Error("selected row carries its cell tone")
+	}
+}
+
+// The bar is added at render time: it changes neither the natural widths
+// nor what the filter matches, and the caller's cells are left untouched.
+func TestTableMeterLeavesWidthsAndFilterAlone(t *testing.T) {
+	rows := []Row{meterRow("db", "999.9MiB / 2GiB", 1), meterRow("redis", "8.1MiB / 1GiB", 0.5)}
+	cols := func(meter bool) []Column {
+		return []Column{
+			{Title: "NAME", Width: 6, Flex: true, Filter: true},
+			{Title: "MEM", Width: 10, Flex: true, Filter: true, Meter: meter},
+		}
+	}
+	with, without := NewTable(cols(true)), NewTable(cols(false))
+	for _, tb := range []*Table{&with, &without} {
+		tb.SetSize(80, 10)
+		tb.SetRows(rows)
+	}
+	if !slices.Equal(with.natural, without.natural) || !slices.Equal(with.widths(), without.widths()) {
+		t.Errorf("meter changed the widths: natural %v / %v, widths %v / %v",
+			with.natural, without.natural, with.widths(), without.widths())
+	}
+	if !strings.Contains(with.View(), barFull) {
+		t.Fatal("no bar drawn, so the checks below prove nothing")
+	}
+	if rows[0].Cells[1] != "999.9MiB / 2GiB" {
+		t.Errorf("caller's cell modified to %q", rows[0].Cells[1])
+	}
+	for _, needle := range []string{barFull, barEmpty, "▌", "  █"} {
+		with.ClearFilter()
+		press(t, &with, "/")
+		typeText(&with, needle)
+		if _, listed, _, _ := with.Position(); listed != 0 {
+			t.Errorf("filter %q matched %d rows through the bar", needle, listed)
+		}
+	}
+}
+
+// Replacing the columns or the rows recomputes where bars go, and untrusted
+// MEM text stays cleaned when a bar is drawn after it.
+func TestTableMeterAfterReplacingColumnsAndRows(t *testing.T) {
+	tb := newMeterTable(60, meterRow("db", "999.9MiB / 2GiB", 0.5))
+	tb.SetColumns([]Column{
+		{Title: "NAME", Width: 6, Filter: true},
+		{Title: "MEM", Width: 19, Flex: true, Meter: true},
+	})
+	if v := ansi.Strip(tb.View()); strings.Contains(v, barEmpty) || strings.Contains(v, barFull) {
+		t.Errorf("bar drawn before SetRows: %q", v)
+	}
+	// Shorter text moves the bar left; wide runes count by cells.
+	tb.SetRows([]Row{meterRow("db", "1MiB / 2GiB", 0.5), meterRow("cn", "中中", 0.5)})
+	if got, want := memCells(t, &tb), []string{
+		"1MiB / 2GiB  █████░░░░░",
+		"中中         █████░░░░░",
+	}; !slices.Equal(got, want) {
+		t.Errorf("MEM cells = %q, want %q", got, want)
+	}
+	// Escape bytes in a cell are replaced, not passed to the terminal.
+	tb.SetRows([]Row{meterRow("sel", "x", 0), meterRow("evil", "\x1b[31mX\x07", 0.5)})
+	line := strings.Split(tb.View(), "\n")[2]
+	if strings.ContainsAny(line, "\x1b\x07") {
+		t.Errorf("unselected untoned row %q holds raw control bytes", line)
+	}
+	if !strings.Contains(line, Bar(0.5, 10)) {
+		t.Errorf("row %q has no bar", line)
+	}
+}
