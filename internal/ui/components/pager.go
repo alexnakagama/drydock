@@ -17,7 +17,8 @@ const horizontalStep = 8
 // not own the lines: the view that embeds it reports how many there are
 // (SetTotal) and how wide the widest is (SetContentWidth), and supplies
 // them when rendering, so a view can keep its lines in whatever structure
-// suits it (a slice, a ring buffer, a filtered index).
+// suits it (a slice, a ring buffer, a filtered index). Lines must be plain
+// and display-safe; styling is supplied as spans (see ViewStyled).
 //
 // The zero value is an empty pager of size 0x0.
 type Pager struct {
@@ -113,9 +114,28 @@ func (p *Pager) clamp() {
 }
 
 // View renders the visible lines into exactly the window size. line returns
-// the line at an index in [0, total); it must return text that is safe to
-// display (see Clean) and contains no ANSI sequences.
+// the line at an index in [0, total). Lines must be plain and display-safe
+// (see Clean): they hold no ANSI sequences. Use ViewStyled to supply styling
+// as spans.
 func (p *Pager) View(line func(i int) string) string {
+	return p.render(line)
+}
+
+// ViewStyled is View for styled lines: line returns the plain, display-safe
+// text of a line and the spans that style it (see RenderSpans). Styling is
+// applied before the horizontal cut, so a span that starts left of the
+// window keeps its style in the visible part, and the text shown is exactly
+// what View shows for the same plain lines. The content width set with
+// SetContentWidth is still that of the plain text.
+func (p *Pager) ViewStyled(line func(i int) (string, []Span)) string {
+	return p.render(func(i int) string {
+		text, spans := line(i)
+		return RenderSpans(text, spans)
+	})
+}
+
+// render draws the window from lines that may hold ANSI styling.
+func (p *Pager) render(line func(i int) string) string {
 	if p.width <= 0 || p.height <= 0 {
 		return ""
 	}
