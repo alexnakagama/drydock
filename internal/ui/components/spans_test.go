@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -114,5 +115,24 @@ func BenchmarkRenderSpansManyMatches(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		RenderSpans(text, spans)
+	}
+}
+
+// KindStateBad renders in RowBad, the error color, on both palettes.
+func TestRenderSpansStateBad(t *testing.T) {
+	saved := Styles
+	t.Cleanup(func() { Styles = saved })
+	for _, tc := range []struct {
+		dark bool
+		p    palette
+	}{{true, darkPalette}, {false, lightPalette}} {
+		Styles = NewStyles(tc.dark)
+		got := RenderSpans("ab", []Span{{0, 1, KindStateBad}})
+		if want := Styles.RowBad.Render("a") + "b"; got != want {
+			t.Errorf("dark=%v: RenderSpans = %q, want %q", tc.dark, got, want)
+		}
+		if want := lipgloss.NewStyle().Foreground(tc.p.error).Render("a") + "b"; got != want {
+			t.Errorf("dark=%v: RenderSpans = %q, want the error color %q", tc.dark, got, want)
+		}
 	}
 }

@@ -48,6 +48,7 @@ const (
 	ToneGood                // healthy, for example a running container
 	ToneWarn                // needs attention, for example a paused container
 	ToneDim                 // inactive, for example an exited container
+	ToneBad                 // critical, for example a cell near its limit
 )
 
 // Row is one table row.
@@ -61,6 +62,11 @@ type Row struct {
 	Cells []string
 	// Tone colors the row while it is not selected.
 	Tone Tone
+	// CellTones colors single cells while the row is not selected, indexed
+	// like Cells. A missing entry, ToneDefault or an unknown tone leaves
+	// the cell in the row's Tone. Like Cells, the slice is shared with the
+	// table and must not be modified after SetRows.
+	CellTones []Tone
 }
 
 // Table is a scrollable, filterable list with a selection that follows its
@@ -463,10 +469,18 @@ func (t *Table) growToNatural(ws, flex []int, extra int) int {
 	return extra
 }
 
+// cellRange is the bytes [start, end) a cell takes in a line built by
+// renderLine.
+type cellRange struct{ start, end int }
+
 // renderLine renders cells in columns of widths ws, fitted to the table
-// width less the gutter. View adds the gutter.
-func (t *Table) renderLine(cells []string, ws []int) string {
+// width less the gutter, and returns the byte range each column's cell
+// takes in the line before that fit. The fit can only cut the end of the
+// line (or pad it), so a range may run past the end of a cut line; callers
+// clamp it. View adds the gutter.
+func (t *Table) renderLine(cells []string, ws []int) (string, []cellRange) {
 	var b strings.Builder
+	ranges := make([]cellRange, len(ws))
 	for i, w := range ws {
 		if i > 0 {
 			b.WriteString(strings.Repeat(" ", columnGap))
@@ -475,9 +489,48 @@ func (t *Table) renderLine(cells []string, ws []int) string {
 		if i < len(cells) {
 			v = Clean(cells[i])
 		}
+		start := b.Len()
 		b.WriteString(Fit(v, w))
+		ranges[i] = cellRange{start, b.Len()}
 	}
-	return Fit(b.String(), t.width-gutterWidth)
+	return Fit(b.String(), t.width-gutterWidth), ranges
+}
+
+// rowSpans covers the whole of an unselected row's line with spans: each
+// cell with a known CellTones entry in that tone's kind, and everything
+// else (other cells, the gaps, padding and a truncation ellipsis) in the
+// row tone's kind. Adjacent spans of the same kind are merged, so a row
+// without cell tones is one span, which renders exactly like its tone's
+// style over the whole line (see TestRenderSpansMatchesStyleRender).
+func rowSpans(r Row, lineLen int, ranges []cellRange) []Span {
+	rowKind := r.Tone.kind()
+	spans := make([]Span, 0, 1+2*min(len(r.CellTones), len(ranges)))
+	add := func(start, end int, k SpanKind) {
+		start, end = min(start, lineLen), min(end, lineLen)
+		if start >= end {
+			return
+		}
+		if n := len(spans); n > 0 && spans[n-1].Kind == k && spans[n-1].End == start {
+			spans[n-1].End = end
+			return
+		}
+		spans = append(spans, Span{Start: start, End: end, Kind: k})
+	}
+	pos := 0
+	for i, rg := range ranges {
+		if i >= len(r.CellTones) {
+			break
+		}
+		k := r.CellTones[i].kind()
+		if k == KindNone {
+			k = rowKind
+		}
+		add(pos, rg.start, rowKind)
+		add(rg.start, rg.end, k)
+		pos = max(pos, rg.end)
+	}
+	add(pos, lineLen, rowKind)
+	return spans
 }
 
 // gutter prepends the gutter to a rendered line: the selection marker and
@@ -513,7 +566,8 @@ func (t *Table) View() string {
 		titles[i] = c.Title
 	}
 	lines := make([]string, 0, t.height)
-	lines = append(lines, t.gutter(Styles.TableHeader.Render(t.renderLine(titles, ws)), false))
+	header, _ := t.renderLine(titles, ws)
+	lines = append(lines, t.gutter(Styles.TableHeader.Render(header), false))
 
 	body := t.bodyHeight()
 	if len(t.visible) == 0 && body > 0 {
@@ -521,14 +575,15 @@ func (t *Table) View() string {
 	}
 	for i := t.offset; i < len(t.visible) && i < t.offset+body; i++ {
 		r := t.visible[i]
-		line := t.renderLine(r.Cells, ws)
+		line, ranges := t.renderLine(r.Cells, ws)
 		if i == t.cursor {
-			// The selection bar is drawn over the untoned line: the tone's
-			// color is not shown on the selected row, whose state stays
-			// readable from its text (for example a state glyph).
+			// The selection bar is drawn over the untoned line: neither the
+			// row's nor the cells' tones are shown on the selected row,
+			// whose state stays readable from its text (for example a state
+			// glyph).
 			line = t.gutter(line, true)
 		} else {
-			line = t.gutter(toneStyle(r.Tone, line), false)
+			line = t.gutter(RenderSpans(line, rowSpans(r, len(line), ranges)), false)
 		}
 		lines = append(lines, line)
 	}
@@ -559,18 +614,20 @@ func (t *Table) emptyLines(body int) []string {
 	return placed
 }
 
-// toneStyle renders an unselected row line in its tone's style. Unknown
-// tones render like ToneDefault.
-func toneStyle(tone Tone, line string) string {
-	switch tone {
+// kind returns the span kind an unselected row or cell of this tone is
+// drawn in. ToneDefault and unknown tones are KindNone (unstyled).
+func (tn Tone) kind() SpanKind {
+	switch tn {
 	case ToneGood:
-		return Styles.RowGood.Render(line)
+		return KindStateGood
 	case ToneWarn:
-		return Styles.RowWarn.Render(line)
+		return KindStateWarn
 	case ToneDim:
-		return Styles.RowDim.Render(line)
+		return KindStateDim
+	case ToneBad:
+		return KindStateBad
 	default:
-		return line
+		return KindNone
 	}
 }
 

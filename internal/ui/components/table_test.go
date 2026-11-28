@@ -612,7 +612,7 @@ func TestTableRowTones(t *testing.T) {
 	tb := newTestTable(rows...)
 	press(t, &tb, "j") // select b, so a, c and d are unselected
 	ws := tb.widths()
-	plain := func(i int) string { return tb.renderLine(rows[i].Cells, ws) }
+	plain := func(i int) string { l, _ := tb.renderLine(rows[i].Cells, ws); return l }
 	selected := func(i int) string {
 		return Styles.SelectionMarker.Render(selectionMarker) + Styles.TableSelected.Render(" "+plain(i))
 	}
@@ -1535,6 +1535,202 @@ func TestTableSetColumnsStateSurvivesEventsBeforeSetRows(t *testing.T) {
 					t.Errorf("offset %d, want %d", tb.offset, wantOffset)
 				}
 				checkTableLines(t, &tb, 70, 6)
+			}
+		})
+	}
+}
+
+// cellRangeOf returns the line renderLine builds for cells and the byte
+// range of column c's cell in it, clamped to the line.
+func cellRangeOf(tb *Table, cells []string, c int) (line string, start, end int) {
+	line, ranges := tb.renderLine(cells, tb.widths())
+	return line, ranges[c].start, min(ranges[c].end, len(line))
+}
+
+func TestTableCellTones(t *testing.T) {
+	rows := []Row{
+		{Key: "a", Cells: []string{"alpha", "img", "up"}, Tone: ToneGood, CellTones: []Tone{ToneDefault, ToneBad}},
+		{Key: "b", Cells: []string{"bravo", "img", "up"}, CellTones: []Tone{ToneDefault, ToneDefault, ToneWarn}},
+		{Key: "c", Cells: []string{"charlie", "img", "up"}, Tone: ToneDim, CellTones: []Tone{Tone(99), ToneDefault}},
+		{Key: "d", Cells: []string{"delta", "img", "up"}, Tone: ToneGood, CellTones: []Tone{ToneBad, ToneBad, ToneBad, ToneWarn}},
+		{Key: "e", Cells: []string{"echo", "img", "up"}, Tone: ToneWarn, CellTones: []Tone{ToneBad}},
+	}
+	tb := newTestTable(rows...)
+	press(t, &tb, "G") // select e, so a to d are unselected
+	lines := strings.Split(tb.View(), "\n")
+	// render is st.Render, except that empty text renders as nothing, as
+	// RenderSpans leaves it.
+	render := func(st lipgloss.Style, s string) string {
+		if s == "" {
+			return ""
+		}
+		return st.Render(s)
+	}
+
+	line, s, e := cellRangeOf(&tb, rows[0].Cells, 1)
+	want := map[string]string{
+		// Only the IMAGE cell is in the error color; the rest of the row,
+		// gaps included, keeps the row's color.
+		"a": "  " + render(Styles.RowGood, line[:s]) + render(Styles.RowBad, line[s:e]) + render(Styles.RowGood, line[e:]),
+	}
+	line, s, e = cellRangeOf(&tb, rows[1].Cells, 2)
+	// An untoned row: only the toned cell is styled.
+	want["b"] = "  " + line[:s] + render(Styles.RowWarn, line[s:e]) + line[e:]
+	line, _, _ = cellRangeOf(&tb, rows[2].Cells, 0)
+	// Unknown and default cell tones fall back to the row's tone.
+	want["c"] = "  " + Styles.RowDim.Render(line)
+	line, _, e = cellRangeOf(&tb, rows[3].Cells, 2)
+	// Every cell in its own tone, the gaps between them in the row's tone;
+	// entries past the last column are ignored.
+	_, s0, e0 := cellRangeOf(&tb, rows[3].Cells, 0)
+	_, s1, e1 := cellRangeOf(&tb, rows[3].Cells, 1)
+	_, s2, _ := cellRangeOf(&tb, rows[3].Cells, 2)
+	want["d"] = "  " + render(Styles.RowBad, line[s0:e0]) + render(Styles.RowGood, line[e0:s1]) +
+		render(Styles.RowBad, line[s1:e1]) + render(Styles.RowGood, line[e1:s2]) + render(Styles.RowBad, line[s2:e]) +
+		render(Styles.RowGood, line[e:])
+
+	for i, r := range rows[:4] {
+		got := lines[i+1]
+		if got != want[r.Key] {
+			t.Errorf("row %q rendered %q, want %q", r.Key, got, want[r.Key])
+		}
+		plain, _ := tb.renderLine(r.Cells, tb.widths())
+		if s := ansi.Strip(got); s != "  "+plain {
+			t.Errorf("row %q stripped %q, want the plain line %q", r.Key, s, "  "+plain)
+		}
+	}
+	// The styles must differ, or the comparisons above prove nothing.
+	if Styles.RowBad.Render("x") == Styles.RowGood.Render("x") || Styles.RowBad.Render("x") == "x" {
+		t.Fatal("RowBad does not stand out")
+	}
+
+	// The selected row is the plain selection of the untoned line: neither
+	// its row tone nor its cell tones are drawn.
+	plain, _ := tb.renderLine(rows[4].Cells, tb.widths())
+	wantSel := Styles.SelectionMarker.Render(selectionMarker) + Styles.TableSelected.Render(" "+plain)
+	if got := lines[5]; got != wantSel {
+		t.Errorf("selected row rendered %q, want %q", got, wantSel)
+	}
+	open, _, _ := strings.Cut(Styles.RowBad.Render("x"), "x")
+	if strings.Contains(lines[5], open) {
+		t.Error("selected row carries a cell tone")
+	}
+	// Moving the selection away shows the cell tone again.
+	press(t, &tb, "k")
+	_, s, e = cellRangeOf(&tb, rows[4].Cells, 0)
+	if got := strings.Split(tb.View(), "\n")[5]; !strings.Contains(got, Styles.RowBad.Render(plain[s:e])) {
+		t.Errorf("unselected row e %q does not show its bad cell", got)
+	}
+	for i, l := range lines {
+		if w := ansi.StringWidth(l); w != 60 {
+			t.Errorf("line %d is %d cells wide, want 60", i, w)
+		}
+	}
+}
+
+// A line cut by the table width keeps every cell's bytes and closes every
+// style it opens, whichever cell the cut falls in.
+func TestTableCellTonesTruncated(t *testing.T) {
+	cells := []string{"alpha", "a-very-long-image-name-é中-that-is-cut", "running"}
+	for width := 1; width <= 60; width++ {
+		for _, tones := range [][]Tone{
+			{ToneDefault, ToneBad},
+			{ToneDefault, ToneDefault, ToneBad},
+			{ToneBad, ToneWarn, ToneBad},
+		} {
+			tb := NewTable([]Column{
+				{Title: "NAME", Width: 10},
+				{Title: "IMAGE", Width: 12},
+				{Title: "STATUS", Width: 8},
+			})
+			tb.SetSize(width, 3)
+			tb.SetRows([]Row{
+				{Key: "sel", Cells: []string{"x"}},
+				{Key: "a", Cells: cells, Tone: ToneGood, CellTones: tones},
+			})
+			lines := strings.Split(tb.View(), "\n")
+			got := lines[2]
+			plain, _ := tb.renderLine(cells, tb.widths())
+			wantPlain := Fit(strings.Repeat(" ", gutterWidth)+plain, width)
+			if width < gutterWidth {
+				wantPlain = strings.Repeat(" ", width)
+			}
+			if s := ansi.Strip(got); s != wantPlain {
+				t.Errorf("width %d tones %v: stripped %q, want %q", width, tones, s, wantPlain)
+			}
+			if w := ansi.StringWidth(got); w != width {
+				t.Errorf("width %d tones %v: line is %d cells wide", width, tones, w)
+			}
+			// Every style opened is closed: the line ends unstyled.
+			if strings.Contains(got, "\x1b[") && !strings.HasSuffix(strings.TrimRight(got, " "), "\x1b[m") {
+				t.Errorf("width %d tones %v: line %q does not end with a reset", width, tones, got)
+			}
+			if n := strings.Count(got, "\x1b[m"); n != strings.Count(got, "\x1b[")-n {
+				t.Errorf("width %d tones %v: %q opens and closes unevenly", width, tones, got)
+			}
+			if width < gutterWidth {
+				continue
+			}
+			// Each bad cell still visible after the cut is drawn in the error
+			// color, cut and ellipsis included; a fully cut one leaves no
+			// trace of it.
+			_, ranges := tb.renderLine(cells, tb.widths())
+			badOpen, _, _ := strings.Cut(Styles.RowBad.Render("x"), "x")
+			anyBad := false
+			for c, tn := range tones {
+				// RenderSpans moves an offset inside a character (here the
+				// ellipsis) to that character's end.
+				start, end := runeBoundary(plain, ranges[c].start), runeBoundary(plain, ranges[c].end)
+				if tn != ToneBad || start >= end {
+					continue
+				}
+				anyBad = true
+				part := plain[start:end]
+				if !strings.Contains(got, Styles.RowBad.Render(part)) {
+					t.Errorf("width %d tones %v: bad cell %d %q not in the error color in %q", width, tones, c, part, got)
+				}
+			}
+			if !anyBad && strings.Contains(got, badOpen) {
+				t.Errorf("width %d tones %v: fully cut bad cells still color %q", width, tones, got)
+			}
+		}
+	}
+	// A cut inside a bad cell draws the ellipsis in that cell's color.
+	tb := NewTable([]Column{{Title: "NAME", Width: 10}, {Title: "IMAGE", Width: 12}})
+	tb.SetSize(2+10+2+6, 3) // the IMAGE cell is cut to 6 cells
+	tb.SetRows([]Row{
+		{Key: "sel", Cells: []string{"x"}},
+		{Key: "a", Cells: []string{"alpha", "postgres-database"}, Tone: ToneGood, CellTones: []Tone{0, ToneBad}},
+	})
+	got := strings.Split(tb.View(), "\n")[2]
+	if !strings.HasSuffix(got, Styles.RowBad.Render("postg…")) {
+		t.Errorf("cut bad cell %q does not end with its text and ellipsis in the error color", got)
+	}
+}
+
+func TestRowSpans(t *testing.T) {
+	ranges := []cellRange{{0, 3}, {5, 8}, {10, 14}}
+	for _, tc := range []struct {
+		name    string
+		r       Row
+		lineLen int
+		want    []Span
+	}{
+		{"no tones", Row{}, 14, []Span{{0, 14, KindNone}}},
+		{"row tone only", Row{Tone: ToneGood}, 14, []Span{{0, 14, KindStateGood}}},
+		{"one cell", Row{Tone: ToneGood, CellTones: []Tone{0, ToneBad}}, 14,
+			[]Span{{0, 5, KindStateGood}, {5, 8, KindStateBad}, {8, 14, KindStateGood}}},
+		{"last cell, padded line", Row{CellTones: []Tone{0, 0, ToneWarn}}, 20,
+			[]Span{{0, 10, KindNone}, {10, 14, KindStateWarn}, {14, 20, KindNone}}},
+		{"cut inside a cell", Row{Tone: ToneDim, CellTones: []Tone{0, ToneBad}}, 6,
+			[]Span{{0, 5, KindStateDim}, {5, 6, KindStateBad}}},
+		{"cut before a toned cell", Row{Tone: ToneDim, CellTones: []Tone{0, 0, ToneBad}}, 7,
+			[]Span{{0, 7, KindStateDim}}},
+		{"empty line", Row{Tone: ToneGood, CellTones: []Tone{ToneBad}}, 0, []Span{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rowSpans(tc.r, tc.lineLen, ranges); !slices.Equal(got, tc.want) {
+				t.Errorf("rowSpans = %v, want %v", got, tc.want)
 			}
 		})
 	}

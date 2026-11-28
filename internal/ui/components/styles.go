@@ -92,6 +92,7 @@ type StyleSet struct {
 	RowGood         lipgloss.Style // unselected row with ToneGood
 	RowWarn         lipgloss.Style // unselected row with ToneWarn
 	RowDim          lipgloss.Style // unselected row with ToneDim
+	RowBad          lipgloss.Style // unselected row or cell with ToneBad
 
 	// Overlays and inputs.
 	Dialog        lipgloss.Style
@@ -158,6 +159,7 @@ func NewStyles(dark bool) StyleSet {
 		RowGood:         lipgloss.NewStyle().Foreground(p.success),
 		RowWarn:         lipgloss.NewStyle().Foreground(p.warn),
 		RowDim:          lipgloss.NewStyle().Foreground(p.muted),
+		RowBad:          lipgloss.NewStyle().Foreground(p.error),
 
 		Dialog:        dialog,
 		ConfirmDialog: dialog.BorderForeground(p.error),

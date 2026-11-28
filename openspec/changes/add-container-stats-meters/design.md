@@ -27,7 +27,7 @@
 
 `Row` gains `CellTones []Tone`, indexed like `Cells`. A missing entry or `ToneDefault` means "use the row's tone". A new `ToneBad` maps to a new `RowBad` style (`Foreground(p.error)`) and a new `KindStateBad`.
 
-`View` renders an unselected row as `RenderSpans(plainLine, spans)`. It emits one span per cell, over that cell's byte range in the plain line, using the cell's tone kind or else the row's tone kind. The gaps between columns stay unstyled, which looks the same because the row styles set only the foreground. The selected row keeps today's path: the plain line in the selection style.
+`View` renders an unselected row as `RenderSpans(plainLine, spans)`. It emits one span per cell, over that cell's byte range in the plain line, using the cell's tone kind or else the row's tone kind. The gaps between columns, the padding and any truncation ellipsis take the row's tone kind, and adjacent spans of the same kind are merged. So a row without cell tones is one span over the whole line, which renders byte for byte like today's `Style.Render(line)` (pinned by `TestRenderSpansMatchesStyleRender`). The selected row keeps today's path: the plain line in the selection style.
 
 - *Why spans over styling each cell with `lipgloss.Render` and joining:* `RenderSpans` guarantees `ansi.Strip(out) == text`, builds each kind's escape sequence once per call, and is already tested. The plain line, and so the truncation, is built exactly as today.
 - *Alternative: nest the cell style inside the row style.* lipgloss closes with a full reset, so the row's color would be lost after the first colored cell.

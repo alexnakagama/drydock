@@ -6,8 +6,8 @@
 
 ## 2. Table: per-cell tones
 
-- [ ] 2.1 Add `ToneBad` to `components.Tone`, `RowBad` (error foreground) to `StyleSet` in both palettes, and `KindStateBad` to `SpanKind` mapped to `RowBad`. Extend `styles_test.go` and `spans_test.go` so the new kind renders in the error color on dark and light palettes. Verify with `go test ./internal/ui/components/`.
-- [ ] 2.2 Make `renderLine` also return each cell's byte range in the plain line (D2). Add `Row.CellTones` and render unselected rows with `RenderSpans` over those ranges, using the cell tone or else the row tone (D1). Keep the selected row on today's selection-style path. Add `table_test.go` cases for these: a toned row with one `ToneBad` cell colors only that cell; the stripped output equals the plain line; a line truncated by the table width keeps valid styling; and the selected row has no cell tone. Verify that `go test ./internal/ui/...` passes with no golden changes.
+- [x] 2.1 Add `ToneBad` to `components.Tone`, `RowBad` (error foreground) to `StyleSet` in both palettes, and `KindStateBad` to `SpanKind` mapped to `RowBad`. Extend `styles_test.go` and `spans_test.go` so the new kind renders in the error color on dark and light palettes. Verify with `go test ./internal/ui/components/`.
+- [x] 2.2 Make `renderLine` also return each cell's byte range in the plain line (D2). Add `Row.CellTones` and render unselected rows with `RenderSpans` over those ranges, using the cell tone or else the row tone (D1). Keep the selected row on today's selection-style path. Add `table_test.go` cases for these: a toned row with one `ToneBad` cell colors only that cell; the stripped output equals the plain line; a line truncated by the table width keeps valid styling; and the selected row has no cell tone. Verify that `go test ./internal/ui/...` passes with no golden changes.
 
 ## 3. Table: meter column and bar
 
