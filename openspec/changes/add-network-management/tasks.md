@@ -36,6 +36,6 @@
 
 ## 7. Integration checks
 
-- [ ] 7.1 Add an integration test (build tag `integration`) that creates labeled networks and containers on a real engine and checks IN USE, the live update after `network connect`, that prune keeps a network whose only container is stopped and removes an unused one, and cleanup; verify `go test -tags integration ./...` passes
-- [ ] 7.2 Run the full local check (`go build ./...`, `gofmt -l .`, `go vet ./...`, `golangci-lint run ./...` and with `--build-tags integration`, `go test -race ./...`) and verify all pass
-- [ ] 7.3 Run `openspec validate add-network-management --strict` and verify it passes
+- [x] 7.1 Add an integration test (build tag `integration`) that creates labeled networks and containers on a real engine and checks IN USE, the live update after `network connect`, that prune keeps a network whose only container is stopped and removes an unused one, and cleanup; verify `go test -tags integration ./...` passes
+- [x] 7.2 Run the full local check (`go build ./...`, `gofmt -l .`, `go vet ./...`, `golangci-lint run ./...` and with `--build-tags integration`, `go test -race ./...`) and verify all pass
+- [x] 7.3 Run `openspec validate add-network-management --strict` and verify it passes
