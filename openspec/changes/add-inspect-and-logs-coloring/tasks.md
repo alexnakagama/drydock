@@ -25,17 +25,17 @@
 
 ## 4. Documentation
 
-- [ ] 4.1 Update the colors paragraph in `README.md`: inspect views color JSON keys, strings, numbers and punctuation, and a container's `State.Status` matches its row color; logs dim a leading timestamp, color the first level word (with the recognized forms), and highlight and underline search matches; the text shown never changes. Check every described form against the scanner tests.
+- [x] 4.1 Update the colors paragraph in `README.md`: inspect views color JSON keys, strings, numbers and punctuation, and a container's `State.Status` matches its row color; logs dim a leading timestamp, color the first level word (with the recognized forms), and highlight and underline search matches; the text shown never changes. Check every described form against the scanner tests.
 
 ## 5. Integration checks
 
-- [ ] 5.1 Run `gofmt -l .`, `go vet ./...`, `golangci-lint run ./...` and `go test -race ./...`, and verify all pass with no golden-file changes (`git status internal/ui/**/testdata` is clean).
-- [ ] 5.2 Run drydock against a real engine:
+- [x] 5.1 Run `gofmt -l .`, `go vet ./...`, `golangci-lint run ./...` and `go test -race ./...`, and verify all pass with no golden-file changes (`git status internal/ui/**/testdata` is clean).
+- [x] 5.2 Run drydock against a real engine:
   - inspect a running and an exited container, an image, a volume and a network, scrolling horizontally across a long string;
   - open logs of a container that prints mixed formats (for example `docker run -d --name lv busybox sh -c 'while :; do echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) ERROR boom"; echo "level=warn msg=slow"; echo "[debug] tick"; echo "no error here"; sleep 1; done'`) and search for `err`.
 
   Confirm the colors match the spec on a dark and a light terminal theme, and that with `NO_COLOR=1` search matches are still underlined.
-- [ ] 5.3 Run `openspec validate add-inspect-and-logs-coloring --strict` and verify it passes.
+- [x] 5.3 Run `openspec validate add-inspect-and-logs-coloring --strict` and verify it passes.
 
 ## Workflow follow-up
 

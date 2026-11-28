@@ -87,6 +87,12 @@ func TestLevelSpan(t *testing.T) {
 		{"bracketed tag before the level", "[main] [error] boom", []tok{{"error", kErr}}},
 		// More forms.
 		{"quoted lvl", `lvl="WARN" msg=x`, []tok{{"WARN", kLWarn}}},
+		{"lowercase lvl", "lvl=warn msg=x", []tok{{"warn", kLWarn}}},
+		{"mixed-case structured forms", "lvl=Warn level=Error", []tok{{"Warn", kLWarn}}},
+		{"mixed-case level=", "level=Error x", []tok{{"Error", kErr}}},
+		{"mixed-case bracket", "[Warn] x", []tok{{"Warn", kLWarn}}},
+		{"JSON level error", `{"level":"error"}`, []tok{{"error", kErr}}},
+		{"no error", "no error", nil},
 		{"bracketed uppercase", "[ERROR] boom", []tok{{"ERROR", kErr}}},
 		{"ERR before a colon", "ERR: retry", []tok{{"ERR", kErr}}},
 		{"INFO alone", "INFO", nil},

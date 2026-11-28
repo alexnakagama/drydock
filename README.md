@@ -201,6 +201,25 @@ still shows its state. Colors follow the terminal's light or dark background,
 and the marker and glyphs keep the selection and states readable without color
 (for example with `NO_COLOR` set).
 
+Inspect views color their JSON by token: keys, strings, numbers (with `true`,
+`false` and `null`) and punctuation each have their own color. In a
+container's inspection, the value of `State.Status` takes the color of the
+container's row, so `"running"` is green, `"paused"` orange and `"exited"`
+dimmed.
+
+The logs view dims a timestamp at the start of a line, such as
+`2026-11-28T10:15:02.123Z` or `[2026-11-28 10:15:02 +0100]`. It colors the
+first log level found in the first 512 bytes of a line: `ERROR`, `ERR`,
+`FATAL`, `PANIC`, `CRIT` and `CRITICAL` in bold red, `WARN` and `WARNING` in
+orange, and `DEBUG` and `TRACE` dimmed. `INFO` keeps the default color. A
+level in uppercase is recognized as a whole word anywhere in that window. In
+any other case it is recognized only as the value of `level=` or `lvl=`, as a
+JSON `"level"` value, or alone in square brackets (`level=error`, `lvl=Warn`,
+`"level":"error"`, `[debug]`), so prose like "no error" is not colored. While
+a log search is active, every match on the shown lines is highlighted and
+underlined, so matches stay visible without color. Coloring never changes the
+text shown, line widths or horizontal scrolling.
+
 The footer shows only the keys that apply to the selected row, most
 important first. For example, `x shell` appears only on a running container,
 and `s` reads `stop` on a running container, `start` on an exited or created
