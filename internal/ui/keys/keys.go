@@ -167,6 +167,9 @@ type ContainersMap struct {
 	Prune key.Binding
 	// Stats switches the PORTS column for the live CPU and MEM columns.
 	Stats key.Binding
+	// Sort cycles the row order through name, CPU and MEM. The view
+	// relabels its help to name the order the next press would choose.
+	Sort key.Binding
 }
 
 // Containers is the containers-view keymap.
@@ -181,11 +184,12 @@ var Containers = ContainersMap{
 	ToggleAll: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/running")),
 	Prune:     key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "prune stopped")),
 	Stats:     key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "stats")),
+	Sort:      key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort cpu")),
 }
 
 // Bindings returns the containers-view bindings in display order.
 func (m ContainersMap) Bindings() []key.Binding {
-	return []key.Binding{m.StartStop, m.Pause, m.Restart, m.Delete, m.Logs, m.Inspect, m.Shell, m.ToggleAll, m.Prune, m.Stats}
+	return []key.Binding{m.StartStop, m.Pause, m.Restart, m.Delete, m.Logs, m.Inspect, m.Shell, m.ToggleAll, m.Prune, m.Stats, m.Sort}
 }
 
 // LogsMap holds the logs view's own keys (scrolling uses Pager).
