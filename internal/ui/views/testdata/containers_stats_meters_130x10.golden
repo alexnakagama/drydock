@@ -1,0 +1,10 @@
+ drydock > containers [all] [stats]                                                                                   ● connected 
+  1 containers (4)   2 images (0)   3 volumes (0)   4 projects (0)   5 networks (3)                                           1/4 
+  NAME                  IMAGE                 STATUS                    CPU      MEM                                              
+▌ db                    postgres:16           ● Up 2 hours              380.0%   999.9MiB / 2GiB  ████▉░░░░░                      
+  frozen                redis:7               ◐ Up 1 hour (Paused)      -        -                                                
+  old                   alpine                ○ Exited (0) 3 days ago   -        -                                                
+  web                   nginx:1.27            ● Up 5 minutes            12.5%    256MiB / 1GiB    ██▌░░░░░░░                      
+                                                                                                                                  
+                                                                                                                                  
+ l logs  s stop  p pause  x shell  i inspect  r restart  d delete  a all/running  / filter  P prune stopped  t ports  ? more      
