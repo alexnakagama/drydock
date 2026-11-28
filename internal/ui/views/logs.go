@@ -368,10 +368,19 @@ func (w *lineWriter) send(b []byte) bool {
 }
 
 // cleanLogLine makes a raw log line safe to display: a trailing CR is
-// dropped, ANSI sequences (colours) are removed, and any other control
-// character is replaced.
+// dropped, invalid UTF-8 is replaced, ANSI sequences (colours) are removed,
+// and any other control character is replaced.
+//
+// Invalid UTF-8 is replaced first and with U+FFFD, which is what a terminal
+// shows for it anyway: a stray byte would otherwise be read together with a
+// following escape sequence by the ANSI-aware width, cut and strip
+// functions, both here and once the line is styled, and a raw 8-bit C1 byte
+// (for example 0x9b, CSI) could reach the terminal.
 func cleanLogLine(b []byte) string {
 	s := string(bytes.TrimSuffix(b, []byte("\r")))
+	if !utf8.ValidString(s) {
+		s = strings.ToValidUTF8(s, "\uFFFD")
+	}
 	if strings.ContainsRune(s, '\x1b') || strings.ContainsRune(s, '\u009b') {
 		s = ansi.Strip(s)
 	}
@@ -553,7 +562,7 @@ func (v *logsView) setSearch(s string) {
 		return
 	}
 	v.search = s
-	v.needle = strings.ToLower(strings.TrimSpace(s))
+	v.needle = searchNeedle(s)
 	v.matches = v.matches[:0:0]
 	if v.needle != "" {
 		first := v.lines.First()
@@ -581,12 +590,24 @@ func (v *logsView) shownLen() int {
 	return v.lines.Len()
 }
 
-// shown returns the i-th shown line.
-func (v *logsView) shown(i int) string {
+// shownLine returns the i-th shown line.
+func (v *logsView) shownLine(i int) logLine {
 	if v.searchActive() {
-		return v.lines.BySeq(v.matches[i]).text
+		return v.lines.BySeq(v.matches[i])
 	}
-	return v.lines.At(i).text
+	return v.lines.At(i)
+}
+
+// shown returns the text of the i-th shown line.
+func (v *logsView) shown(i int) string { return v.shownLine(i).text }
+
+// shownStyled returns the text of the i-th shown line and the spans that
+// style it: its timestamp, level and search matches. They are computed
+// here, when the line is drawn, so only the visible lines are scanned and
+// kept lines hold no extra memory.
+func (v *logsView) shownStyled(i int) (string, []components.Span) {
+	l := v.shownLine(i)
+	return l.text, logLineSpans(l, v.needle)
 }
 
 // append adds lines, dropping the oldest beyond the caps. While following,
@@ -663,7 +684,7 @@ func (v *logsView) View() string {
 			body = ""
 		}
 	} else {
-		body = v.pager.View(v.shown)
+		body = v.pager.ViewStyled(v.shownStyled)
 	}
 	if !v.searching {
 		return body
