@@ -1008,7 +1008,7 @@ func (v *containersView) inspect(c container.Summary) tea.Cmd {
 	return ui.Push(newInspectView(v.st, store.ContainerName(c), func(ctx context.Context, svc docker.Service) (json.RawMessage, error) {
 		res, err := svc.ContainerInspect(ctx, id)
 		return res.Raw, err
-	}))
+	}, withContainerState()))
 }
 
 // stateName returns a container state for display.

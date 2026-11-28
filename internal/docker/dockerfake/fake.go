@@ -856,6 +856,11 @@ func (s *Service) ContainerInspect(ctx context.Context, id string) (docker.Conta
 		},
 		Mounts: slices.Clone(c.Mounts),
 	}
+	// Like the engine, State.Health is reported only for a container with
+	// a healthcheck.
+	if c.Health != nil && c.Health.Status != container.NoHealthcheck && c.Health.Status != "" {
+		resp.State.Health = &container.Health{Status: c.Health.Status, FailingStreak: c.Health.FailingStreak}
+	}
 	raw, err := json.Marshal(resp)
 	if err != nil {
 		return docker.ContainerInspectResult{}, err

@@ -15,6 +15,7 @@ import (
 	"github.com/alexnakagama/drydock/internal/docker"
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
 	"github.com/alexnakagama/drydock/internal/store"
+	"github.com/alexnakagama/drydock/internal/ui/components"
 )
 
 // imgID returns a full image ID made of one repeated hex digit.
@@ -505,6 +506,9 @@ func TestInspectImage(t *testing.T) {
 	e.selectImage("nginx:1.27")
 	e.press("i")
 	e.until("inspect loaded", func() bool { return strings.Contains(e.screen(), `"RepoTags"`) })
+	if raw := e.m.View().Content; !strings.Contains(raw, components.Styles.JSONKey.Render(`"Id"`)) {
+		t.Errorf("image inspection not colored:\n%q", raw)
+	}
 	if h := e.header(); !strings.HasPrefix(h, "drydock > images > nginx:1.27 > inspect") {
 		t.Errorf("header %q", h)
 	}

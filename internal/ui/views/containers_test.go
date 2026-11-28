@@ -550,7 +550,7 @@ func TestInspectReportsError(t *testing.T) {
 
 func TestPrettyJSONSanitizes(t *testing.T) {
 	t.Parallel()
-	lines, err := prettyJSON([]byte("{\"a\":\"x\u009b31my\u202e\",\"b\":[1,2]}"))
+	lines, _, err := prettyJSON([]byte("{\"a\":\"x\u009b31my\u202e\",\"b\":[1,2]}"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestPrettyJSONSanitizes(t *testing.T) {
 	if !strings.Contains(got, `  "b": [`) {
 		t.Errorf("not indented: %q", got)
 	}
-	if _, err := prettyJSON([]byte("{not json")); err == nil {
+	if _, _, err := prettyJSON([]byte("{not json"), false); err == nil {
 		t.Error("invalid JSON accepted")
 	}
 }
