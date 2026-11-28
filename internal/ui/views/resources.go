@@ -23,10 +23,6 @@ type Prefs struct {
 // startup order.
 type sortOrder int
 
-// TODO(add-container-stats-sorting): drop the nolint once the comparator
-// and cycleSort (tasks 2-3) use these orders.
-//
-//nolint:unused // declared ahead of the sort comparator and view wiring
 const (
 	// sortName orders rows by name, then ID.
 	sortName sortOrder = iota
@@ -37,6 +33,32 @@ const (
 	// no value last.
 	sortMem
 )
+
+// next returns the order `o` switches to from o: name, CPU, MEM, then name
+// again. An unknown order goes back to name.
+func (o sortOrder) next() sortOrder {
+	switch o {
+	case sortName:
+		return sortCPU
+	case sortCPU:
+		return sortMem
+	default:
+		return sortName
+	}
+}
+
+// label names o as the header and the footer show it: "name", "cpu" or
+// "mem". An unknown order reads as name, which is how it sorts.
+func (o sortOrder) label() string {
+	switch o {
+	case sortCPU:
+		return "cpu"
+	case sortMem:
+		return "mem"
+	default:
+		return "name"
+	}
+}
 
 // Resources returns the root views the command bar and the resource tabs
 // can switch to, in tab order, backed by st. The views share one Prefs, so

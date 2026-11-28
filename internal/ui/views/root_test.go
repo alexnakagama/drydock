@@ -149,7 +149,7 @@ func TestTabsProjectsCount(t *testing.T) {
 func TestFooterWideShowsEverything(t *testing.T) {
 	e := newEnv(t, mixedContainers(), 200, 12)
 	e.selectRow("web")
-	want := " l logs  s stop  p pause  x shell  i inspect  r restart  d delete  a all/running  / filter  P prune stopped  t stats  : command  ? help  q quit"
+	want := " l logs  s stop  p pause  x shell  i inspect  r restart  d delete  a all/running  / filter  P prune stopped  t stats  o sort cpu  : command  ? help  q quit"
 	if got := e.footer(); got != want {
 		t.Errorf("footer\n  %q\nwant\n  %q", got, want)
 	}

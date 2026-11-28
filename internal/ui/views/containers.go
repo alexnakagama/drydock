@@ -203,6 +203,9 @@ type containersView struct {
 	// which follows prefs.Stats whenever the view is on screen.
 	prefs     *Prefs
 	statsCols bool
+	// sortApplied is the row order list was last sorted in (see
+	// effectiveSort): what the header and the `o` hint describe.
+	sortApplied sortOrder
 	// compose says what the Compose column shows, and composeCols whether
 	// the table has it: while the snapshot has any Compose project,
 	// whatever the listed rows.
@@ -301,6 +304,9 @@ func (v *containersView) Indicators() []string {
 	if v.statsCols {
 		ind = append(ind, "stats")
 	}
+	if v.sortApplied != sortName {
+		ind = append(ind, "sort "+v.sortApplied.label())
+	}
 	if f := v.table.Filter(); f != "" {
 		ind = append(ind, "/"+f)
 	}
@@ -309,19 +315,20 @@ func (v *containersView) Indicators() []string {
 
 // KeyHelp returns the view's bindings in priority order, as copies:
 // actions that do not apply to the selected container (or that need a
-// selection when there is none) are disabled, and `s`, `p` and `t` are
+// selection when there is none) are disabled, and `s`, `p`, `t` and `o` are
 // labelled with what they would do. `p` follows `s`, so it is dropped late;
-// `P`, which needs no selection, comes just before `t`, and `t` comes last,
-// so it is the first hint the footer drops when it runs out of room. Key
-// presses are still matched against keys.Containers, so a disabled hint
-// never disables its key.
+// `P`, which needs no selection, comes just before `t`, and `t` and `o`
+// come last, so they are the first hints the footer drops when it runs out
+// of room, `o` first. Key presses are still matched against keys.Containers,
+// so a disabled hint never disables its key.
 func (v *containersView) KeyHelp() []key.Binding {
 	km := keys.Containers
 	logs, startStop, pause, shell, inspect, restart, del := km.Logs, km.StartStop, km.Pause, km.Shell, km.Inspect, km.Restart, km.Delete
-	stats := km.Stats
+	stats, sortKey := km.Stats, km.Sort
 	if v.statsCols {
 		stats.SetHelp(km.Stats.Help().Key, "ports")
 	}
+	sortKey.SetHelp(km.Sort.Help().Key, "sort "+v.sortApplied.next().label())
 	c, ok := v.selected()
 	if !ok {
 		disable(&logs, &startStop, &pause, &shell, &inspect, &restart, &del)
@@ -343,7 +350,7 @@ func (v *containersView) KeyHelp() []key.Binding {
 			disable(&shell)
 		}
 	}
-	return []key.Binding{logs, startStop, pause, shell, inspect, restart, del, km.ToggleAll, keys.Table.Filter, km.Prune, stats}
+	return []key.Binding{logs, startStop, pause, shell, inspect, restart, del, km.ToggleAll, keys.Table.Filter, km.Prune, stats, sortKey}
 }
 
 // Position reports the table's selection and row counts (ui.Positioner).
@@ -364,14 +371,20 @@ func (v *containersView) Close() {
 
 // SetActive starts reading stats when the view comes on screen with stats
 // on, and stops when it leaves the screen (ui.Activatable). A view revealed
-// again first takes the layout chosen meanwhile in another containers view.
+// again first takes the layout and the sort order chosen meanwhile in
+// another containers view.
 func (v *containersView) SetActive(active bool) tea.Cmd {
 	if v.closed {
 		return nil
 	}
 	v.active = active
-	if active && v.statsCols != v.prefs.Stats {
-		v.applyLayout()
+	if active {
+		switch {
+		case v.statsCols != v.prefs.Stats:
+			v.applyLayout()
+		case v.sortApplied != v.effectiveSort():
+			v.setRows()
+		}
 	}
 	return v.syncStats()
 }
@@ -438,6 +451,9 @@ func (v *containersView) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	if key.Matches(msg, km.Stats) {
 		return v.toggleStats()
 	}
+	if key.Matches(msg, km.Sort) {
+		return v.cycleSort()
+	}
 	if key.Matches(msg, km.Prune) {
 		return v.confirmPrune()
 	}
@@ -475,11 +491,48 @@ func (v *containersView) selected() (container.Summary, bool) {
 }
 
 // toggleStats flips the session's stats setting and applies it to this
-// view: other containers views take it when they are next shown.
+// view: other containers views take it when they are next shown. Turning
+// stats off also sets the sort order back to name, since the CPU and MEM
+// orders sort on the stats columns (see Prefs.Sort).
 func (v *containersView) toggleStats() tea.Cmd {
 	v.prefs.Stats = !v.prefs.Stats
+	if !v.prefs.Stats {
+		v.prefs.Sort = sortName
+	}
 	v.applyLayout()
 	return v.syncStats()
+}
+
+// cycleSort moves the session's sort order to the next one (name, CPU,
+// MEM, then name) and applies it to this view: other containers views take
+// it when they are next shown. Choosing CPU or MEM with stats off turns
+// stats on, as `t` would, starting the stats subscription; choosing name
+// leaves stats as they are.
+//
+// The next order follows the one this view shows, which is what its `o`
+// hint names.
+func (v *containersView) cycleSort() tea.Cmd {
+	v.prefs.Sort = v.sortApplied.next()
+	if v.prefs.Sort != sortName && !v.prefs.Stats {
+		v.prefs.Stats = true
+	}
+	if v.statsCols != v.prefs.Stats {
+		v.applyLayout()
+	} else {
+		v.setRows()
+	}
+	return v.syncStats()
+}
+
+// effectiveSort returns the order the rows are sorted in: the session's
+// sort order while the table shows the stats columns, and name otherwise,
+// so a view whose layout has not caught up with prefs (one hidden while
+// another view changed them) never sorts on columns it does not show.
+func (v *containersView) effectiveSort() sortOrder {
+	if v.statsCols {
+		return v.prefs.Sort
+	}
+	return sortName
 }
 
 // applyLayout switches the table to the layout prefs.Stats and the
@@ -624,8 +677,14 @@ func (v *containersView) refresh() {
 	v.setRows()
 }
 
-// setRows rebuilds the table rows from the list, in the table's layout.
+// setRows sorts the list in the effective order (see effectiveSort) and
+// rebuilds the table rows from it, in the table's layout. Every path that
+// changes the rows or the values they are sorted on ends here, so the order
+// always matches the cells shown. The table keeps the selection on the
+// same container wherever its row moves.
 func (v *containersView) setRows() {
+	v.sortApplied = v.effectiveSort()
+	slices.SortFunc(v.list, containerOrder(v.sortApplied, v.conn, v.stats))
 	rows := make([]components.Row, len(v.list))
 	for i, c := range v.list {
 		cells := make([]string, 0, 6)

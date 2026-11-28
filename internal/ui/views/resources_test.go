@@ -38,11 +38,11 @@ func TestResourcesOrder(t *testing.T) {
 	}
 }
 
-// A fresh Resources, as after a restart, starts with stats off, and its
-// views share one Prefs, so the setting is session-wide.
+// A fresh Resources, as after a restart, starts with stats off and in name
+// order, and its views share one Prefs, so the settings are session-wide.
 func TestResourcesShareSessionPrefsStartingOff(t *testing.T) {
-	if (Prefs{}).Stats {
-		t.Fatal("the zero Prefs has stats on")
+	if (Prefs{}).Stats || (Prefs{}).Sort != sortName {
+		t.Fatal("the zero Prefs has stats on or a stats sort")
 	}
 	st := store.New(dockerfake.New(), func(tea.Msg) {})
 	rs := Resources(st)
@@ -55,10 +55,20 @@ func TestResourcesShareSessionPrefsStartingOff(t *testing.T) {
 	if cv.prefs.Stats || cv.statsCols {
 		t.Error("a fresh containers view has stats on")
 	}
+	if cv.prefs.Sort != sortName || cv.sortApplied != sortName {
+		t.Error("a fresh containers view is not in name order")
+	}
 	if cv.prefs != iv.prefs || cv.prefs != vv.prefs || cv.prefs != pv.prefs || cv.prefs != nv.prefs {
 		t.Error("the resource views do not share one Prefs")
 	}
-	if again := Resources(st)[0].New(store.Snapshot{}).(*containersView); again.prefs == cv.prefs {
+	// Settings chosen in one session do not carry into the next.
+	cv.prefs.Stats, cv.prefs.Sort = true, sortCPU
+	again := Resources(st)[0].New(store.Snapshot{}).(*containersView)
+	t.Cleanup(again.Close)
+	if again.prefs == cv.prefs {
 		t.Error("a new Resources reuses the previous session's Prefs")
+	}
+	if again.prefs.Stats || again.prefs.Sort != sortName || again.statsCols || again.sortApplied != sortName {
+		t.Error("a new Resources does not start in name order with stats off")
 	}
 }

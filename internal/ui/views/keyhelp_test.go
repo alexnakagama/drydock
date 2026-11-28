@@ -143,11 +143,11 @@ func TestContainersKeyHelp(t *testing.T) {
 		name string
 		want []string
 	}{
-		{"web", []string{"l logs", "s stop", "p pause", "x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats"}},
-		{"old", []string{"l logs", "s start", "-p pause/unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats"}},
-		{"fresh", []string{"l logs", "s start", "-p pause/unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats"}},
-		{"frozen", []string{"l logs", "-s start/stop", "p unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats"}},
-		{"boot", []string{"l logs", "-s start/stop", "-p pause/unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats"}},
+		{"web", []string{"l logs", "s stop", "p pause", "x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats", "o sort cpu"}},
+		{"old", []string{"l logs", "s start", "-p pause/unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats", "o sort cpu"}},
+		{"fresh", []string{"l logs", "s start", "-p pause/unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats", "o sort cpu"}},
+		{"frozen", []string{"l logs", "-s start/stop", "p unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats", "o sort cpu"}},
+		{"boot", []string{"l logs", "-s start/stop", "-p pause/unpause", "-x shell", "i inspect", "r restart", "d delete", "a all/running", "/ filter", "P prune stopped", "t stats", "o sort cpu"}},
 	}
 	for _, tt := range tests {
 		e.selectRow(tt.name)
@@ -159,7 +159,7 @@ func TestContainersKeyHelpEmpty(t *testing.T) {
 	e := newEnv(t, dockerfake.New(), 100, 8)
 	checkHelp(t, "empty list", e.root().KeyHelp(), []string{
 		"-l logs", "-s start/stop", "-p pause/unpause", "-x shell", "-i inspect", "-r restart", "-d delete", "a all/running", "/ filter",
-		"P prune stopped", "t stats",
+		"P prune stopped", "t stats", "o sort cpu",
 	})
 
 	// A filter matching nothing leaves no selection either.
@@ -170,7 +170,7 @@ func TestContainersKeyHelpEmpty(t *testing.T) {
 	e.press("enter")
 	checkHelp(t, "filtered to nothing", e.root().KeyHelp(), []string{
 		"-l logs", "-s start/stop", "-p pause/unpause", "-x shell", "-i inspect", "-r restart", "-d delete", "a all/running", "/ filter",
-		"P prune stopped", "t stats",
+		"P prune stopped", "t stats", "o sort cpu",
 	})
 }
 
@@ -202,15 +202,31 @@ func TestContainersFooterPauseHint(t *testing.T) {
 	}
 }
 
-// TestFooterDropsStatsHintFirst checks that the t hint stays the first view
-// hint dropped from a narrow footer, now that P comes before it.
+// TestFooterDropsStatsHintFirst checks that the o and t hints are the
+// first view hints dropped from a narrow footer, o before t, now that P
+// comes before them.
 func TestFooterDropsStatsHintFirst(t *testing.T) {
 	f, _ := sample()
 	e := newEnv(t, f, 120, 12)
 	e.selectRow("web")
 	ft := e.footer()
-	if strings.Contains(ft, "t stats") || !strings.Contains(ft, "P prune stopped") || !strings.HasSuffix(ft, "? more") {
-		t.Errorf("footer %q, want P prune stopped kept and t stats dropped", ft)
+	if strings.Contains(ft, "o sort") || strings.Contains(ft, "t stats") || !strings.Contains(ft, "P prune stopped") ||
+		!strings.HasSuffix(ft, "? more") {
+		t.Errorf("footer %q, want P prune stopped kept and o sort cpu and t stats dropped", ft)
+	}
+}
+
+// TestFooterDropsSortHintBeforeStats checks that a footer with room for t
+// but not for o drops only o. At 130 columns the footer fits the hints up
+// to t stats and ? more but not o sort cpu (which needs 136); retune the
+// width if a hint before them changes length.
+func TestFooterDropsSortHintBeforeStats(t *testing.T) {
+	f, _ := sample()
+	e := newEnv(t, f, 130, 12)
+	e.selectRow("web")
+	ft := e.footer()
+	if strings.Contains(ft, "o sort") || !strings.Contains(ft, "P prune stopped  t stats  ? more") {
+		t.Errorf("footer %q, want t stats kept and o sort cpu dropped", ft)
 	}
 }
 
