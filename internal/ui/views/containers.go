@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -53,7 +54,7 @@ var statsColumns = []components.Column{
 	{Title: "IMAGE", Width: 20, Flex: true, Filter: true},
 	{Title: "STATUS", Width: 24},
 	{Title: "CPU", Width: 7},
-	{Title: "MEM", Width: 19, Flex: true},
+	{Title: "MEM", Width: 19, Flex: true, Meter: true},
 }
 
 // composeColumnWidth is the minimum width of the Compose column (PROJECT or
@@ -79,7 +80,7 @@ var (
 		{Title: "IMAGE", Width: 12, Flex: true, Filter: true},
 		{Title: "STATUS", Width: 24},
 		{Title: "CPU", Width: 7},
-		{Title: "MEM", Width: 15, Flex: true},
+		{Title: "MEM", Width: 15, Flex: true, Meter: true},
 	}
 )
 
@@ -685,6 +686,14 @@ func (v *containersView) refresh() {
 func (v *containersView) setRows() {
 	v.sortApplied = v.effectiveSort()
 	slices.SortFunc(v.list, containerOrder(v.sortApplied, v.conn, v.stats))
+	v.table.SetRows(v.rows())
+}
+
+// rows returns the table rows for the list, in its current order and the
+// table's layout. In the stats layout the CPU and MEM cells take their
+// usage tones and the row its memory level as the MEM meter (see
+// statsLevels).
+func (v *containersView) rows() []components.Row {
 	rows := make([]components.Row, len(v.list))
 	for i, c := range v.list {
 		cells := make([]string, 0, 6)
@@ -696,15 +705,36 @@ func (v *containersView) setRows() {
 			displayImage(c.Image),
 			containerGlyph(c.State)+" "+displayStatus(c),
 		)
+		r := components.Row{Key: c.ID, Tone: containerTone(c.State)}
 		if v.statsCols {
 			cpu, mem := v.statsCells(c)
+			cpuTone, memTone, meter, hasMeter := statsLevels(shownStats(c, v.conn, v.stats))
+			if cpuTone != components.ToneDefault || memTone != components.ToneDefault {
+				r.CellTones = make([]components.Tone, len(cells)+2)
+				r.CellTones[len(cells)] = cpuTone
+				r.CellTones[len(cells)+1] = memTone
+			}
+			r.Meter, r.HasMeter = meter, hasMeter
 			cells = append(cells, cpu, mem)
 		} else {
 			cells = append(cells, FormatPorts(c.Ports))
 		}
-		rows[i] = components.Row{Key: c.ID, Tone: containerTone(c.State), Cells: cells}
+		r.Cells = cells
+		rows[i] = r
 	}
-	v.table.SetRows(rows)
+	return rows
+}
+
+// statsLevels returns how the stats cells showing s are drawn: the CPU and
+// MEM cells' usage tones (see usageTone), and the memory level the MEM
+// meter shows, if any. s must come from shownStats, so placeholder cells,
+// containers that are not running and every row while disconnected have no
+// tone and no meter.
+func statsLevels(s store.ContainerStats) (cpuTone, memTone components.Tone, meter float64, hasMeter bool) {
+	cpuTone = usageTone(cpuLevel(s))
+	meter, hasMeter = memLevel(s)
+	memTone = usageTone(meter, hasMeter)
+	return cpuTone, memTone, meter, hasMeter
 }
 
 // statsCells returns c's CPU and MEM cells: its latest values, or noStats
@@ -801,6 +831,55 @@ func shownCPU(pct float64) float64 {
 		return pct
 	}
 	return v
+}
+
+// Usage thresholds: a CPU or MEM cell whose usage level (see cpuLevel and
+// memLevel) reaches usageWarnLevel is drawn in the warning color, and one
+// that reaches usageBadLevel in the error color.
+const (
+	usageWarnLevel = 0.7
+	usageBadLevel  = 0.9
+)
+
+// cpuLevel returns the share of the host's CPU capacity s's CPU cell shows:
+// the value as the cell shows it (see shownCPU), over 100% times the number
+// of online CPUs. It reports no level when s has no CPU value, no CPU count
+// or a value that is not a number.
+func cpuLevel(s store.ContainerStats) (float64, bool) {
+	if !s.HasCPU || s.CPUs <= 0 {
+		return 0, false
+	}
+	l := shownCPU(s.CPUPercent) / (100 * float64(s.CPUs))
+	if math.IsNaN(l) {
+		return 0, false
+	}
+	return l, true
+}
+
+// memLevel returns the share of its memory limit s uses, from the byte
+// values rather than the rounded cell text, clamped to [0, 1]. It reports no
+// level when s has no memory value or a zero limit.
+func memLevel(s store.ContainerStats) (float64, bool) {
+	if !s.HasMem || s.MemLimit == 0 {
+		return 0, false
+	}
+	return min(float64(s.MemUsage)/float64(s.MemLimit), 1), true
+}
+
+// usageTone returns the tone of a stats cell at usage level l: ToneBad from
+// usageBadLevel, ToneWarn from usageWarnLevel, and ToneDefault (the row's
+// tone) below that or when ok is false.
+func usageTone(l float64, ok bool) components.Tone {
+	switch {
+	case !ok:
+		return components.ToneDefault
+	case l >= usageBadLevel:
+		return components.ToneBad
+	case l >= usageWarnLevel:
+		return components.ToneWarn
+	default:
+		return components.ToneDefault
+	}
 }
 
 // formatCPU renders a CPU percentage with one decimal, as `docker stats`
