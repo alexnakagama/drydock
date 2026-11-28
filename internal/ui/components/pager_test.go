@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/alexnakagama/drydock/internal/ui/uitest"
 )
 
@@ -79,4 +81,80 @@ func TestPagerZeroSize(t *testing.T) {
 	if p.View(func(int) string { return "x" }) != "" {
 		t.Error("zero-size pager rendered something")
 	}
+}
+
+func TestPagerViewStyled(t *testing.T) {
+	// Each line has a string span crossing both window edges once scrolled,
+	// and wide characters that the cut can split.
+	lines := []string{
+		`  "Image": "nginx:1.27-alpine-long-value",`,
+		`  "Name": "中文中文中文中文中文",`,
+		`  "x": 1`,
+	}
+	spans := func(i int) []Span {
+		l := lines[i]
+		colon := strings.Index(l, ":")
+		end := len(l)
+		if strings.HasSuffix(l, ",") {
+			end--
+		}
+		return []Span{
+			{2, colon, KindJSONKey},
+			{colon, colon + 1, KindJSONPunct},
+			{colon + 2, end, KindJSONString},
+		}
+	}
+	plain := func(i int) string { return lines[i] }
+	styled := func(i int) (string, []Span) { return lines[i], spans(i) }
+	sgr := func(k SpanKind) string {
+		s, _, _ := strings.Cut(k.style().Render("x"), "x")
+		return s
+	}
+
+	for _, size := range []struct{ width, left int }{
+		{80, 0}, {12, 0}, {12, 13}, {12, 14}, {12, 15}, {7, 18}, {5, 30},
+	} {
+		var p Pager
+		p.SetSize(size.width, len(lines))
+		p.SetTotal(len(lines))
+		p.SetContentWidth(ansi.StringWidth(lines[0]))
+		p.left = size.left
+		p.clamp()
+
+		want := p.View(plain)
+		got := p.ViewStyled(styled)
+		if s := ansi.Strip(got); s != want {
+			t.Errorf("width %d left %d: stripped\n%q\nwant\n%q", size.width, p.left, s, want)
+		}
+		for i, l := range strings.Split(got, "\n") {
+			if w := ansi.StringWidth(l); w != size.width {
+				t.Errorf("width %d left %d line %d: %d cells", size.width, p.left, i, w)
+			}
+			// A line cut inside the string span starts in that span's style.
+			if sp := spans(i)[2]; p.left > ansi.StringWidth(lines[i][:sp.Start]) && p.left < ansi.StringWidth(lines[i][:sp.End]) {
+				if got := leadingStyle(l); got != sgr(KindJSONString) {
+					t.Errorf("width %d left %d line %d: %q starts in style %q, want the string style", size.width, p.left, i, l, got)
+				}
+			}
+			// Styling never leaks past the end of a line.
+			if last := strings.LastIndex(l, "\x1b["); last >= 0 && !strings.HasPrefix(l[last:], "\x1b[m") {
+				t.Errorf("width %d left %d line %d: %q leaves a style open", size.width, p.left, i, l)
+			}
+		}
+	}
+}
+
+// leadingStyle returns the last escape sequence before the first printable
+// character of l: the style that character is drawn in. ansi.Cut keeps the
+// sequences of spans left of the cut, which are already closed.
+func leadingStyle(l string) string {
+	last := ""
+	for strings.HasPrefix(l, "\x1b[") {
+		end := strings.IndexByte(l, 'm')
+		if end < 0 {
+			break
+		}
+		last, l = l[:end+1], l[end+1:]
+	}
+	return last
 }

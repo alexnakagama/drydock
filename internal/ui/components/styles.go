@@ -17,6 +17,9 @@ type palette struct {
 	onAccent  color.Color // text drawn on an accent background
 	bar       color.Color // header bar background
 	selection color.Color // selected-row background, a subtle accent tint
+
+	matchBg color.Color // search-match highlight background
+	matchFg color.Color // text drawn on matchBg
 }
 
 // darkPalette is used on dark terminal backgrounds, and until the terminal
@@ -30,6 +33,8 @@ var darkPalette = palette{
 	onAccent:  lipgloss.Color("16"),
 	bar:       lipgloss.Color("235"),
 	selection: lipgloss.Color("24"),
+	matchBg:   lipgloss.Color("220"),
+	matchFg:   lipgloss.Color("16"),
 }
 
 // lightPalette uses darker shades of the same hues, so text stays readable
@@ -43,6 +48,8 @@ var lightPalette = palette{
 	onAccent:  lipgloss.Color("231"),
 	bar:       lipgloss.Color("255"),
 	selection: lipgloss.Color("153"),
+	matchBg:   lipgloss.Color("222"),
+	matchFg:   lipgloss.Color("16"),
 }
 
 // StyleSet holds every style used by drydock's UI, so the look is defined
@@ -94,6 +101,19 @@ type StyleSet struct {
 	HelpKey       lipgloss.Style
 	HelpSection   lipgloss.Style
 	InputPrompt   lipgloss.Style
+
+	// Inspection JSON tokens (see SpanKind).
+	JSONKey    lipgloss.Style
+	JSONString lipgloss.Style
+	JSONNumber lipgloss.Style // numbers and the literals true, false, null
+	JSONPunct  lipgloss.Style
+
+	// Log lines.
+	LogTime     lipgloss.Style // a leading timestamp
+	LogError    lipgloss.Style
+	LogWarn     lipgloss.Style
+	LogDebug    lipgloss.Style
+	SearchMatch lipgloss.Style // underlined, so it shows without color
 }
 
 // NewStyles returns the style set for a dark (dark true) or light terminal
@@ -146,6 +166,17 @@ func NewStyles(dark bool) StyleSet {
 		HelpKey:       lipgloss.NewStyle().Bold(true).Foreground(p.accent),
 		HelpSection:   lipgloss.NewStyle().Bold(true).Underline(true),
 		InputPrompt:   lipgloss.NewStyle().Bold(true).Foreground(p.accent),
+
+		JSONKey:    lipgloss.NewStyle().Foreground(p.accent),
+		JSONString: lipgloss.NewStyle().Foreground(p.success),
+		JSONNumber: lipgloss.NewStyle().Foreground(p.warn),
+		JSONPunct:  lipgloss.NewStyle().Foreground(p.muted),
+
+		LogTime:     lipgloss.NewStyle().Foreground(p.muted),
+		LogError:    lipgloss.NewStyle().Bold(true).Foreground(p.error),
+		LogWarn:     lipgloss.NewStyle().Foreground(p.warn),
+		LogDebug:    lipgloss.NewStyle().Foreground(p.muted),
+		SearchMatch: lipgloss.NewStyle().Foreground(p.matchFg).Background(p.matchBg).Underline(true),
 	}
 }
 
