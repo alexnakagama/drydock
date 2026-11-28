@@ -17,6 +17,7 @@ import (
 	"github.com/alexnakagama/drydock/internal/docker"
 	"github.com/alexnakagama/drydock/internal/docker/dockerfake"
 	"github.com/alexnakagama/drydock/internal/store"
+	"github.com/alexnakagama/drydock/internal/ui/components"
 )
 
 // anonVolume is the generated name of an anonymous volume.
@@ -364,6 +365,9 @@ func TestInspectVolume(t *testing.T) {
 	e.selectVolume("pgdata")
 	e.press("i")
 	e.until("inspect loaded", func() bool { return strings.Contains(e.screen(), `"Mountpoint"`) })
+	if raw := e.m.View().Content; !strings.Contains(raw, components.Styles.JSONKey.Render(`"Name"`)) {
+		t.Errorf("volume inspection not colored:\n%q", raw)
+	}
 	if h := e.header(); !strings.HasPrefix(h, "drydock > volumes > pgdata > inspect") {
 		t.Errorf("header %q", h)
 	}

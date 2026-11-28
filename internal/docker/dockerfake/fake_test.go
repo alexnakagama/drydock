@@ -1475,3 +1475,36 @@ func TestContainerStatsDisconnectDropsQueuedSamples(t *testing.T) {
 		t.Error("a lost connection ended the stream without an error")
 	}
 }
+
+func TestContainerInspectHealth(t *testing.T) {
+	t.Parallel()
+	ctx := ctxT(t)
+	f := New()
+	tests := []struct {
+		name   string
+		health *container.HealthSummary
+		want   container.HealthStatus // "" for no State.Health
+	}{
+		{"no health", nil, ""},
+		{"no healthcheck", &container.HealthSummary{Status: container.NoHealthcheck}, ""},
+		{"healthy", &container.HealthSummary{Status: container.Healthy, FailingStreak: 0}, container.Healthy},
+		{"unhealthy", &container.HealthSummary{Status: container.Unhealthy, FailingStreak: 3}, container.Unhealthy},
+	}
+	for i, tt := range tests {
+		id := f.AddContainer(container.Summary{ID: strings.Repeat(string(rune('a'+i)), 64), Names: []string{"/c"}, State: container.StateRunning, Health: tt.health})
+		res, err := f.ContainerInspect(ctx, id)
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		h := res.Container.State.Health
+		switch {
+		case tt.want == "" && h != nil:
+			t.Errorf("%s: State.Health = %+v, want none", tt.name, h)
+		case tt.want != "" && (h == nil || h.Status != tt.want || h.FailingStreak != tt.health.FailingStreak):
+			t.Errorf("%s: State.Health = %+v, want %s with streak %d", tt.name, h, tt.want, tt.health.FailingStreak)
+		}
+		if tt.want != "" && !bytes.Contains(res.Raw, []byte(`"Health":{"Status":"`+string(tt.want)+`"`)) {
+			t.Errorf("%s: raw inspection lacks the health status: %s", tt.name, res.Raw)
+		}
+	}
+}

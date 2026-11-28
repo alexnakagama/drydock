@@ -319,6 +319,9 @@ func TestInspectNetwork(t *testing.T) {
 	e.selectNetwork("myapp_default")
 	e.press("i")
 	e.until("inspect loaded", func() bool { return strings.Contains(e.screen(), `"IPAM"`) })
+	if raw := e.m.View().Content; !strings.Contains(raw, components.Styles.JSONKey.Render(`"Name"`)) {
+		t.Errorf("network inspection not colored:\n%q", raw)
+	}
 	if h := e.header(); !strings.HasPrefix(h, "drydock > networks > myapp_default > inspect") {
 		t.Errorf("header %q", h)
 	}
