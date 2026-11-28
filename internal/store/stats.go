@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"math"
 	"sync"
 	"time"
 
@@ -20,6 +21,11 @@ type ContainerStats struct {
 	// across cores: a container using two full cores reports 200.
 	CPUPercent float64
 	HasCPU     bool
+	// CPUs is the number of online CPUs the engine reported for the sample
+	// CPUPercent was computed from, so CPUPercent / (100 * CPUs) is the
+	// share of the host's capacity in use. It is set only with HasCPU, and
+	// is then always positive.
+	CPUs int
 	// MemUsage is the memory usage in bytes, excluding the inactive page
 	// cache; MemLimit is the limit the engine reports (host memory when the
 	// container has none).
@@ -30,36 +36,48 @@ type ContainerStats struct {
 // statsFromSample computes a ContainerStats from one stream sample.
 func statsFromSample(s container.StatsResponse) ContainerStats {
 	var cs ContainerStats
-	cs.CPUPercent, cs.HasCPU = cpuPercent(s)
+	cs.CPUPercent, cs.CPUs, cs.HasCPU = cpuPercent(s)
 	cs.MemUsage, cs.MemLimit, cs.HasMem = memUsage(s)
 	return cs
 }
 
 // cpuPercent returns the CPU usage between s's previous and current
 // counters, as `docker stats` computes it: the container's CPU time delta
-// over the host's, times the number of online CPUs, times 100. It reports
-// no value for the first record of a stream (whose previous counters are
+// over the host's, times the number of online CPUs, times 100. It also
+// returns that number of online CPUs. It reports no value (and a CPU count
+// of 0) for the first record of a stream (whose previous counters are
 // empty; the CLI shows a meaningless cumulative figure there), when the
 // host counter did not advance, when the container counter went backwards,
 // and when the CPU count is unknown.
-func cpuPercent(s container.StatsResponse) (float64, bool) {
+func cpuPercent(s container.StatsResponse) (percent float64, cpus int, ok bool) {
 	cur, pre := &s.CPUStats, &s.PreCPUStats
 	if pre.SystemUsage == 0 {
-		return 0, false
+		return 0, 0, false
 	}
 	if cur.SystemUsage <= pre.SystemUsage || cur.CPUUsage.TotalUsage < pre.CPUUsage.TotalUsage {
-		return 0, false
+		return 0, 0, false
 	}
-	online := uint64(cur.OnlineCPUs)
+	online := onlineCPUs(&s.CPUStats)
 	if online == 0 {
-		online = uint64(len(cur.CPUUsage.PercpuUsage))
-	}
-	if online == 0 {
-		return 0, false
+		return 0, 0, false
 	}
 	cpuDelta := float64(cur.CPUUsage.TotalUsage - pre.CPUUsage.TotalUsage)
 	sysDelta := float64(cur.SystemUsage - pre.SystemUsage)
-	return cpuDelta / sysDelta * float64(online) * 100, true
+	return cpuDelta / sysDelta * float64(online) * 100, online, true
+}
+
+// onlineCPUs returns the number of online CPUs in c, as `docker stats`
+// reads it: OnlineCPUs, or else the length of the per-CPU usage list that
+// older engines send instead. It returns 0 when neither is reported, and
+// also for a count too large for an int, which no real host reports.
+func onlineCPUs(c *container.CPUStats) int {
+	if c.OnlineCPUs != 0 {
+		if uint64(c.OnlineCPUs) > math.MaxInt {
+			return 0 // only reachable where int is 32 bits
+		}
+		return int(c.OnlineCPUs)
+	}
+	return len(c.CPUUsage.PercpuUsage)
 }
 
 // memUsage returns s's memory usage without the inactive page cache, and

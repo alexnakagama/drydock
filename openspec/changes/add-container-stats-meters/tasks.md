@@ -2,7 +2,7 @@
 
 ## 1. Store: CPU count
 
-- [ ] 1.1 Add `CPUs int` to `store.ContainerStats` and set it in `statsFromSample` from the same online-CPU value `cpuPercent` uses (`OnlineCPUs`, else `len(PercpuUsage)`). Do this by having `cpuPercent` return the count, or with a small shared helper. Extend `internal/store/stats_test.go` with cases for `OnlineCPUs` set, the `PercpuUsage` fallback, and `CPUs == 0` whenever `HasCPU` is false. Verify with `go test ./internal/store/`.
+- [x] 1.1 Add `CPUs int` to `store.ContainerStats` and set it in `statsFromSample` from the same online-CPU value `cpuPercent` uses (`OnlineCPUs`, else `len(PercpuUsage)`). Do this by having `cpuPercent` return the count, or with a small shared helper. Extend `internal/store/stats_test.go` with cases for `OnlineCPUs` set, the `PercpuUsage` fallback, and `CPUs == 0` whenever `HasCPU` is false. Verify with `go test ./internal/store/`.
 
 ## 2. Table: per-cell tones
 

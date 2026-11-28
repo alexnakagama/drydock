@@ -5,6 +5,7 @@ import (
 	"errors"
 	"iter"
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -45,27 +46,89 @@ func TestCPUPercent(t *testing.T) {
 	percpu.CPUStats.CPUUsage.PercpuUsage = []uint64{1, 2, 3, 4}
 	noCPUs := cpuSample(interval, 4*interval, 0)
 
+	// OnlineCPUs wins over the per-CPU list when both are reported.
+	both := cpuSample(interval, 4*interval, 4)
+	both.CPUStats.CPUUsage.PercpuUsage = []uint64{1, 2}
+	// The previous sample's CPU count is not the one that counts.
+	preOnly := cpuSample(interval, 4*interval, 0)
+	preOnly.PreCPUStats.OnlineCPUs = 4
+
 	tests := []struct {
-		name   string
-		sample container.StatsResponse
-		want   float64
-		wantOK bool
+		name     string
+		sample   container.StatsResponse
+		want     float64
+		wantCPUs int
+		wantOK   bool
 	}{
-		{"one core of four", cpuSample(interval, 4*interval, 4), 100, true},
-		{"two cores of eight", cpuSample(2*interval, 8*interval, 8), 200, true},
-		{"idle", cpuSample(0, 4*interval, 4), 0, true},
-		{"first stream record", first, 0, false},
-		{"no host delta", cpuSample(interval, 0, 4), 0, false},
-		{"negative cpu delta", cpuSample(-1, 4*interval, 4), 0, false},
-		{"online 0 falls back to percpu", percpu, 100, true},
-		{"no cpu count", noCPUs, 0, false},
+		{"one core of four", cpuSample(interval, 4*interval, 4), 100, 4, true},
+		{"two cores of eight", cpuSample(2*interval, 8*interval, 8), 200, 8, true},
+		{"single core", cpuSample(interval, interval, 1), 100, 1, true},
+		{"idle", cpuSample(0, 4*interval, 4), 0, 4, true},
+		{"online preferred over percpu", both, 100, 4, true},
+		{"first stream record", first, 0, 0, false},
+		{"no host delta", cpuSample(interval, 0, 4), 0, 0, false},
+		{"negative cpu delta", cpuSample(-1, 4*interval, 4), 0, 0, false},
+		{"online 0 falls back to percpu", percpu, 100, 4, true},
+		{"no cpu count", noCPUs, 0, 0, false},
+		{"only previous cpu count", preOnly, 0, 0, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got, ok := cpuPercent(tt.sample)
-			if ok != tt.wantOK || math.Abs(got-tt.want) > 1e-9 {
-				t.Errorf("cpuPercent = %v, %v; want %v, %v", got, ok, tt.want, tt.wantOK)
+			got, cpus, ok := cpuPercent(tt.sample)
+			if ok != tt.wantOK || cpus != tt.wantCPUs || math.Abs(got-tt.want) > 1e-9 {
+				t.Errorf("cpuPercent = %v, %d, %v; want %v, %d, %v", got, cpus, ok, tt.want, tt.wantCPUs, tt.wantOK)
+			}
+			// statsFromSample carries the same values, and a CPU count
+			// only together with a CPU value.
+			cs := statsFromSample(tt.sample)
+			if cs.HasCPU != tt.wantOK || cs.CPUs != tt.wantCPUs || cs.CPUPercent != got {
+				t.Errorf("statsFromSample CPU = %v, %d, %v; want %v, %d, %v",
+					cs.CPUPercent, cs.CPUs, cs.HasCPU, got, tt.wantCPUs, tt.wantOK)
+			}
+			if !cs.HasCPU && cs.CPUs != 0 {
+				t.Errorf("CPUs = %d without HasCPU", cs.CPUs)
+			}
+			if cs.HasCPU && cs.CPUs <= 0 {
+				t.Errorf("CPUs = %d with HasCPU", cs.CPUs)
+			}
+		})
+	}
+}
+
+func maxCPUsForIntSize() int {
+	if strconv.IntSize == 32 {
+		return 0
+	}
+	n := uint64(math.MaxUint32) // a variable, so 32-bit builds still compile
+	return int(n)
+}
+
+func TestOnlineCPUs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		online uint32
+		percpu []uint64
+		want   int
+	}{
+		{"online set", 8, nil, 8},
+		{"online set with percpu", 8, []uint64{1, 2}, 8},
+		{"percpu fallback", 0, []uint64{1, 2, 3}, 3},
+		{"neither", 0, nil, 0},
+		{"empty percpu", 0, []uint64{}, 0},
+		// The largest count fits an int on 64-bit platforms; on 32-bit ones
+		// it does not, and reads as unknown rather than wrapping negative.
+		{"largest count", math.MaxUint32, nil, maxCPUsForIntSize()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var c container.CPUStats
+			c.OnlineCPUs = tt.online
+			c.CPUUsage.PercpuUsage = tt.percpu
+			if got := onlineCPUs(&c); got != tt.want {
+				t.Errorf("onlineCPUs = %d, want %d", got, tt.want)
 			}
 		})
 	}
