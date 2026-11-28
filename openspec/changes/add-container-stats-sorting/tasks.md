@@ -21,7 +21,7 @@
 
 ## 4. Documentation
 
-- [ ] 4.1 Update `README.md`: add `o` sort to the Containers row of the key table, and add to the stats paragraph that `o` cycles name → CPU → MEM (largest first, `-` rows last), turns stats on when needed, re-sorts as values refresh, applies session-wide, and that `t` turning stats off brings back the name order; on narrow terminals `o` is dropped before `t`. Verify the described keys match `keys.Containers`.
+- [x] 4.1 Update `README.md`: add `o` sort to the Containers row of the key table, and add to the stats paragraph that `o` cycles name → CPU → MEM (largest first, `-` rows last), turns stats on when needed, re-sorts as values refresh, applies session-wide, and that `t` turning stats off brings back the name order; on narrow terminals `o` is dropped before `t`. Verify the described keys match `keys.Containers`.
 
 ## 5. Integration checks
 

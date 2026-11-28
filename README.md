@@ -233,8 +233,19 @@ containers included), its first sample has not arrived yet, the engine does
 not report that value, or drydock is disconnected from the engine. Stats are
 read from the engine only while a containers view with stats on is on
 screen, and only for the running containers of that view, including those a
-`/` filter hides. On narrow terminals, the `t` hint is the first footer
-hint dropped; `?` still lists it.
+`/` filter hides.
+
+`o` cycles the row order of a containers view through name, CPU and MEM, and
+back to name. CPU and MEM sort largest first (CPU on the value shown, MEM on
+memory usage), ties fall back to name order, and rows showing `-` come last,
+in name order. Choosing CPU or MEM turns stats on if they are off, and
+cycling back to name leaves them on. While sorted by CPU or MEM, the header
+shows `sort cpu` or `sort mem`, the rows re-sort each time the values
+refresh, and the selected container stays selected as its row moves. Like
+stats, the order applies to every containers view until you quit and is not
+saved. Turning stats off with `t` brings back the name order. On narrow
+terminals, the `o` hint is the first footer hint dropped and `t` the next;
+`?` still lists both.
 
 The projects view (`4` or `:projects`) lists one row per Compose project,
 derived from the `com.docker.compose.project` label Docker Compose puts on
@@ -314,7 +325,7 @@ are kept:
 
 | View       | Keys                                                               |
 |------------|--------------------------------------------------------------------|
-| Containers | `s` start/stop, `p` pause/unpause, `r` restart, `d` delete, `l` logs, `i` inspect, `x` shell, `a` all/running, `P` prune stopped, `t` stats/ports |
+| Containers | `s` start/stop, `p` pause/unpause, `r` restart, `d` delete, `l` logs, `i` inspect, `x` shell, `a` all/running, `P` prune stopped, `t` stats/ports, `o` sort name/CPU/MEM |
 | Images     | `Enter` containers using it, `p` pull, `d` delete, `i` inspect, `P` prune dangling, `a` all/tagged |
 | Volumes    | `Enter` containers using it, `c` create, `d` delete, `i` inspect, `P` prune unused |
 | Projects   | `Enter` containers, `s` start/stop, `r` restart                    |
