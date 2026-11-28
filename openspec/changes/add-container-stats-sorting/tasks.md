@@ -2,8 +2,8 @@
 
 ## 1. Sort setting and key binding
 
-- [ ] 1.1 Add the `sortOrder` type (`sortName` zero value, `sortCPU`, `sortMem`) and a `Sort` field to `views.Prefs` in `internal/ui/views/resources.go`, documenting the invariant that a sort other than name implies `Stats`; verify `go build ./...` succeeds.
-- [ ] 1.2 Add `Sort` (`o`, help `sort cpu`) to `keys.Containers` in `internal/ui/keys/keys.go` and to its help list; extend `keys_test.go` with `{"Sort", Containers.Sort, "o"}` and verify `go test ./internal/ui/keys/` passes, including the existing check that no two containers bindings share a key.
+- [x] 1.1 Add the `sortOrder` type (`sortName` zero value, `sortCPU`, `sortMem`) and a `Sort` field to `views.Prefs` in `internal/ui/views/resources.go`, documenting the invariant that a sort other than name implies `Stats`; verify `go build ./...` succeeds.
+- [x] 1.2 Add `Sort` (`o`, help `sort cpu`) to `keys.Containers` in `internal/ui/keys/keys.go` and to its help list; extend `keys_test.go` with `{"Sort", Containers.Sort, "o"}` and verify `go test ./internal/ui/keys/` passes, including the existing check that no two containers bindings share a key.
 
 ## 2. Comparator
 

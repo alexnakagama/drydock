@@ -77,6 +77,7 @@ func TestContainersKeysDistinct(t *testing.T) {
 		key  string
 	}{
 		{"Stats", Containers.Stats, "t"},
+		{"Sort", Containers.Sort, "o"},
 		{"Pause", Containers.Pause, "p"},
 		{"Prune", Containers.Prune, "P"},
 	} {
