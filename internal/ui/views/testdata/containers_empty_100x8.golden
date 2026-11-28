@@ -5,4 +5,4 @@
                                        No running containers.                                       
                                                                                                     
                                                                                                     
- a all/running  / filter  P prune stopped  t stats  : command  ? help  q quit                       
+ a all/running  / filter  P prune stopped  t stats  o sort cpu  : command  ? help  q quit           
