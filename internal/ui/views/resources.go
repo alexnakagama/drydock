@@ -23,6 +23,10 @@ type Prefs struct {
 // startup order.
 type sortOrder int
 
+// TODO(add-container-stats-sorting): drop the nolint once the comparator
+// and cycleSort (tasks 2-3) use these orders.
+//
+//nolint:unused // declared ahead of the sort comparator and view wiring
 const (
 	// sortName orders rows by name, then ID.
 	sortName sortOrder = iota
