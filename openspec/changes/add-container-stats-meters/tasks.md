@@ -22,7 +22,7 @@
 
 ## 5. Documentation
 
-- [ ] 5.1 Update the stats section of `README.md`. Add that CPU and MEM cells turn the warning color at 70% and the error color at 90% of host CPU capacity or of the memory limit. Also add that wider terminals show a memory bar after the MEM text, and that the text itself is unchanged, so `NO_COLOR` users read the same values. Verify the thresholds match `usageTone`.
+- [x] 5.1 Update the stats section of `README.md`. Add that CPU and MEM cells turn the warning color at 70% and the error color at 90% of host CPU capacity or of the memory limit. Also add that wider terminals show a memory bar after the MEM text, and that the text itself is unchanged, so `NO_COLOR` users read the same values. Verify the thresholds match `usageTone`.
 
 ## 6. Integration checks
 

@@ -254,6 +254,18 @@ read from the engine only while a containers view with stats on is on
 screen, and only for the running containers of that view, including those a
 `/` filter hides.
 
+A CPU or MEM cell turns the warning color when its usage reaches 70% and the
+error color at 90%. CPU is measured against the host's capacity (the number
+of online CPUs × 100%), so on a 4-core host `280.0%` is 70%; MEM is usage
+against the memory limit. A `-` cell, or a MEM cell whose limit the engine
+reports as zero, keeps its row's color. On terminals wide enough that the MEM
+column has spare room, each MEM cell with a value also shows a bar of usage
+against the limit after its text, for example `512.3MiB / 2GiB  ██▌░░░░░░░`,
+with the bars aligned across rows; at 100 columns there is no bar. The CPU
+and MEM text itself never changes, so with `NO_COLOR` set the values read the
+same, and the bars still show their level uncolored. The selected row shows
+its bar with the selection highlight alone.
+
 `o` cycles the row order of a containers view through name, CPU and MEM, and
 back to name. CPU and MEM sort largest first (CPU on the value shown, MEM on
 memory usage), ties fall back to name order, and rows showing `-` come last,
