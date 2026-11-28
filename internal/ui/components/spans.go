@@ -22,10 +22,12 @@ const (
 	KindJSONNumber // numbers and the literals true, false, null
 	KindJSONPunct
 
-	// A container state value, colored like the container's row.
+	// A container state value, colored like the container's row, and the
+	// tones a table row or cell is drawn in (see Tone).
 	KindStateGood
 	KindStateWarn
 	KindStateDim
+	KindStateBad
 
 	// Log lines.
 	KindLogTime
@@ -61,6 +63,8 @@ func (k SpanKind) style() *lipgloss.Style {
 		return &Styles.RowWarn
 	case KindStateDim:
 		return &Styles.RowDim
+	case KindStateBad:
+		return &Styles.RowBad
 	case KindLogTime:
 		return &Styles.LogTime
 	case KindLogError:
