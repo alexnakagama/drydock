@@ -22,6 +22,12 @@ const (
 	// selectionMarker marks the selected row in the gutter, so the
 	// selection is visible without color.
 	selectionMarker = "▌"
+	// meterGap is the number of spaces between a meter column's text and
+	// its bar.
+	meterGap = 2
+	// minMeterWidth and maxMeterWidth bound a meter bar's width in cells.
+	minMeterWidth = 5
+	maxMeterWidth = 10
 )
 
 // Column describes a table column.
@@ -36,6 +42,13 @@ type Column struct {
 	Flex bool
 	// Filter marks the column as searched by the list filter.
 	Filter bool
+	// Meter draws each row's Meter fraction as a bar (see Bar) in the
+	// column's spare width: after the widest of the column's listed cells
+	// and a gap, at most maxMeterWidth cells wide. The bar is drawn only
+	// when the column is wider than its minimum width and at least
+	// minMeterWidth cells are left for it, so it never changes a column's
+	// width, and neither the widths nor the filter see it.
+	Meter bool
 }
 
 // Tone colors an unselected row by its resource's state. The selected row
@@ -67,6 +80,12 @@ type Row struct {
 	// the cell in the row's Tone. Like Cells, the slice is shared with the
 	// table and must not be modified after SetRows.
 	CellTones []Tone
+	// Meter is the fraction drawn as a bar in each Meter column, when
+	// HasMeter is set and the row has a cell in that column. It is clamped
+	// to [0, 1] (see Bar). The bar is part of the cell, so it takes the
+	// cell's tone.
+	Meter    float64
+	HasMeter bool
 }
 
 // Table is a scrollable, filterable list with a selection that follows its
@@ -80,6 +99,7 @@ type Table struct {
 	lowered   [][]string // lower-cased filter cells of all, by row
 	cellWidth [][]int    // rendered width of each cleaned cell of all, by row
 	natural   []int      // natural width of each column over visible
+	textMax   []int      // widest cell of each column over visible, without title or minimum
 	cursor    int
 	offset    int
 	width     int
@@ -137,7 +157,7 @@ func (t *Table) SetColumns(cols []Column) {
 	}
 	t.cols = slices.Clone(cols)
 	t.all, t.visible = nil, nil
-	t.lowered, t.cellWidth, t.natural = nil, nil, nil
+	t.lowered, t.cellWidth, t.natural, t.textMax = nil, nil, nil, nil
 }
 
 // SetRows replaces the rows. The selection stays on the row with the same
@@ -318,10 +338,11 @@ func (t *Table) setFilter(f string) {
 	t.refilter(true)
 }
 
-// refilter recomputes the visible rows and the columns' natural widths. The
-// selection follows its key; if the key is gone it falls back to the first
-// row when the filter changed (the list was narrowed or widened by the
-// user), or to the nearest row otherwise (the resource disappeared).
+// refilter recomputes the visible rows, the columns' natural widths and
+// their widest listed cells. The selection follows its key; if the key is
+// gone it falls back to the first row when the filter changed (the list was
+// narrowed or widened by the user), or to the nearest row otherwise (the
+// resource disappeared).
 func (t *Table) refilter(filterChanged bool) {
 	prev, hadPrev := t.Selected()
 	prevIdx := t.cursor
@@ -333,7 +354,8 @@ func (t *Table) refilter(filterChanged bool) {
 
 	needle := strings.ToLower(strings.TrimSpace(t.filter))
 	t.visible = t.visible[:0:0]
-	t.natural = make([]int, 0, len(t.cols)) // fresh: a copied Table must not share it
+	t.natural = make([]int, 0, len(t.cols)) // fresh: a copied Table must not share them
+	t.textMax = make([]int, len(t.cols))
 	for _, c := range t.cols {
 		t.natural = append(t.natural, max(c.Width, 1, ansi.StringWidth(Clean(c.Title))))
 	}
@@ -342,6 +364,7 @@ func (t *Table) refilter(filterChanged bool) {
 			t.visible = append(t.visible, r)
 			for c, w := range t.cellWidth[i] {
 				t.natural[c] = max(t.natural[c], w)
+				t.textMax[c] = max(t.textMax[c], w)
 			}
 		}
 	}
@@ -533,6 +556,58 @@ func rowSpans(r Row, lineLen int, ranges []cellRange) []Span {
 	return spans
 }
 
+// meterWidths returns the width of the bar drawn in each column this frame,
+// given the rendered column widths ws, or nil if no column draws one. A
+// Meter column draws a bar only when it is wider than its minimum width and
+// at least minMeterWidth cells are left after its widest listed cell and
+// the gap; this keeps every layout at the minimum widths bar-free whatever
+// the cells hold.
+func (t *Table) meterWidths(ws []int) []int {
+	var bars []int
+	for c, col := range t.cols {
+		if !col.Meter || c >= len(ws) || c >= len(t.textMax) {
+			continue
+		}
+		w := ws[c]
+		barW := min(maxMeterWidth, w-t.textMax[c]-meterGap)
+		if w <= max(col.Width, 1) || barW < minMeterWidth {
+			continue
+		}
+		if bars == nil {
+			bars = make([]int, len(t.cols))
+		}
+		bars[c] = barW
+	}
+	return bars
+}
+
+// meterCells returns r's cells with a bar drawn into each Meter column that
+// has one this frame (bars, from meterWidths): the cleaned text padded to
+// the column's widest listed cell, the gap, then the bar. It returns
+// r.Cells itself when there is nothing to draw, and never modifies it.
+func (t *Table) meterCells(r Row, bars []int) []string {
+	if bars == nil || !r.HasMeter {
+		return r.Cells
+	}
+	var cells []string
+	for c, barW := range bars {
+		if barW == 0 || c >= len(r.Cells) {
+			continue
+		}
+		if cells == nil {
+			cells = slices.Clone(r.Cells)
+		}
+		// textMax covers this row's cleaned cell, so Fit only pads.
+		// renderLine cleans the result again, which is a no-op here.
+		cells[c] = Fit(Clean(r.Cells[c]), t.textMax[c]) +
+			strings.Repeat(" ", meterGap) + Bar(r.Meter, barW)
+	}
+	if cells == nil {
+		return r.Cells
+	}
+	return cells
+}
+
 // gutter prepends the gutter to a rendered line: the selection marker and
 // the start of the selection bar on the selected row, blanks otherwise. On
 // a table narrower than the gutter, only the part of the gutter that fits
@@ -569,13 +644,14 @@ func (t *Table) View() string {
 	header, _ := t.renderLine(titles, ws)
 	lines = append(lines, t.gutter(Styles.TableHeader.Render(header), false))
 
+	bars := t.meterWidths(ws)
 	body := t.bodyHeight()
 	if len(t.visible) == 0 && body > 0 {
 		lines = append(lines, t.emptyLines(body)...)
 	}
 	for i := t.offset; i < len(t.visible) && i < t.offset+body; i++ {
 		r := t.visible[i]
-		line, ranges := t.renderLine(r.Cells, ws)
+		line, ranges := t.renderLine(t.meterCells(r, bars), ws)
 		if i == t.cursor {
 			// The selection bar is drawn over the untoned line: neither the
 			// row's nor the cells' tones are shown on the selected row,
